@@ -52,6 +52,9 @@ BUILTIN = [
     Preset("Spectrum", ["#ff0000", "#00ff00", "#0000ff", "#ff00ff"], animation="spectrum", speed=2),
     Preset("Fireplace", ["#ff6a00", "#ff4500", "#ff4500", "#ff6a00"], animation="candle", speed=4),
     Preset("Northern Lights", ["#00ff99", "#00ccff", "#7a00ff", "#00ff99"], animation="aurora", speed=3),
+    # Made for automation: dim, static, easy on the eyes and the battery.
+    Preset("Night", ["#ff5a00", "#ff5a00", "#ff5a00", "#ff8c1a"], brightness=25),
+    Preset("Battery Saver", ["#3a7bff", "#3a7bff", "#3a7bff", "#00c8ff"], brightness=20),
 ]
 
 

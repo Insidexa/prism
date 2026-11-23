@@ -8,11 +8,15 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+
+GObject_SYNC = GObject.BindingFlags.SYNC_CREATE
 
 from . import APP_ID, __version__  # noqa: E402
 from .backend import (ANIMATIONS, THERMAL_PROFILES, OmenDevice,  # noqa: E402
                       OmenError, curve_is_risky)
+from .automation import (EXAMPLE_RULES, POWER_CHOICES, POWER_LABELS,  # noqa: E402
+                         AutomationStore, Rule, on_ac_power, pick)
 from .presets import Preset, PresetStore  # noqa: E402
 from .sensors import Sensors  # noqa: E402
 from .widgets import (FanCurveEditor, KeyboardPreview, Sparkline, Swatch,  # noqa: E402
@@ -485,6 +489,178 @@ class PerformancePage(Gtk.Box):
             self.refresh()
 
 
+class AutomationPage(Gtk.Box):
+    """Rules that switch presets by time of day and power source."""
+
+    def __init__(self, win: "PrismWindow"):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.win = win
+        self.store = AutomationStore()
+        self.presets = PresetStore()
+        self.enabled, self.rules = False, []
+        self._loading = False
+
+        page = Adw.PreferencesPage()
+        self.append(page)
+
+        top = Adw.PreferencesGroup(
+            description="Rules are checked from the top; the first that matches picks the preset. "
+                        "Colours you change by hand stay until a different rule starts to apply.")
+        self.enable_row = Adw.SwitchRow(title="Switch presets automatically",
+                                        subtitle="By time of day and whether the laptop is plugged in")
+        self.enable_row.connect("notify::active", self._toggled)
+        top.add(self.enable_row)
+        self.now_row = Adw.ActionRow(title="Right now")
+        top.add(self.now_row)
+        page.add(top)
+
+        self.rules_group = Adw.PreferencesGroup(title="Rules")
+        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add rule", css_classes=["flat"])
+        add.connect("clicked", lambda *_: self._edit(None))
+        self.rules_group.set_header_suffix(add)
+        page.add(self.rules_group)
+        self._rows: list[Gtk.Widget] = []
+
+        GLib.timeout_add_seconds(15, self._tick)
+
+    def refresh(self) -> None:
+        try:
+            self.enabled, self.rules = self.store.load()
+        except (ValueError, TypeError) as e:
+            self.win.toast(f"automation.json is invalid: {e}")
+            return
+        self._loading = True
+        self.enable_row.set_active(self.enabled)
+        self._loading = False
+        for row in self._rows:
+            self.rules_group.remove(row)
+        self._rows = []
+        if not self.rules:
+            empty = Adw.ActionRow(title="No rules yet",
+                                  subtitle="Example: dim “Battery Saver” on battery, warm “Night” from 22:00 to 07:00")
+            btn = Gtk.Button(label="Add examples", valign=Gtk.Align.CENTER)
+            btn.connect("clicked", self._add_examples)
+            empty.add_suffix(btn)
+            self._add_row(empty)
+        names = {p.name for p in self.presets.all()}
+        for i, rule in enumerate(self.rules):
+            row = Adw.ActionRow(title=GLib.markup_escape_text(f"{i + 1}. {rule.preset}"),
+                                subtitle=rule.describe() + ("" if rule.preset in names else " · preset missing"),
+                                activatable=True)
+            row.connect("activated", lambda _r, i=i: self._edit(i))
+            for icon, tip, cb, ok in (
+                    ("prism-go-up-symbolic", "Move up", self._move, i > 0),
+                    ("prism-go-down-symbolic", "Move down", self._move, i < len(self.rules) - 1),
+                    ("prism-trash-symbolic", "Delete", self._delete, True)):
+                b = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER,
+                               css_classes=["flat"], sensitive=ok)
+                if tip == "Move up":
+                    b.connect("clicked", lambda _b, i=i: cb(i, -1))
+                elif tip == "Move down":
+                    b.connect("clicked", lambda _b, i=i: cb(i, 1))
+                else:
+                    b.connect("clicked", lambda _b, i=i: cb(i))
+                row.add_suffix(b)
+            self._add_row(row)
+        self._tick()
+
+    def _add_row(self, row):
+        self.rules_group.add(row)
+        self._rows.append(row)
+
+    def _tick(self):
+        from datetime import datetime
+        now = datetime.now()
+        ac = on_ac_power()
+        hit = pick(self.rules, now.hour * 60 + now.minute, ac)
+        where = f"{'Plugged in' if ac else 'On battery'} · {now:%H:%M}"
+        if not self.enabled:
+            what = "automatic presets are off"
+        elif hit:
+            what = f"rule {hit[0] + 1} → {hit[1].preset}"
+        else:
+            what = "no rule matches, lighting is left as is"
+        self.now_row.set_subtitle(GLib.markup_escape_text(f"{where} · {what}"))
+        return GLib.SOURCE_CONTINUE
+
+    def _save(self) -> bool:
+        try:
+            self.store.save(self.enabled, self.rules)
+        except ValueError as e:
+            self.win.toast(str(e))
+            return False
+        self.refresh()
+        return True
+
+    def _toggled(self, row, _p):
+        if self._loading:
+            return
+        self.enabled = row.get_active()
+        if self._save():
+            self.win.toast("Automatic presets on" if self.enabled else "Automatic presets off")
+
+    def _add_examples(self, _b):
+        self.rules = [Rule(**vars(r)) for r in EXAMPLE_RULES]
+        self.enabled = True
+        self._save()
+
+    def _move(self, i, d):
+        self.rules[i], self.rules[i + d] = self.rules[i + d], self.rules[i]
+        self._save()
+
+    def _delete(self, i):
+        del self.rules[i]
+        self._save()
+
+    def _edit(self, index: int | None):
+        rule = self.rules[index] if index is not None else Rule(self.presets.all()[0].name)
+        names = [p.name for p in self.presets.all()]
+        if rule.preset not in names:
+            names.append(rule.preset)
+
+        box = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
+        preset_row = Adw.ComboRow(title="Preset", model=Gtk.StringList.new(names))
+        preset_row.set_selected(names.index(rule.preset))
+        power_row = Adw.ComboRow(title="When",
+                                 model=Gtk.StringList.new([POWER_LABELS[p] for p in POWER_CHOICES]))
+        power_row.set_selected(POWER_CHOICES.index(rule.power))
+        timed = Adw.SwitchRow(title="Only between certain times", active=rule.start is not None)
+        start = Adw.EntryRow(title="From (HH:MM)", text=rule.start or "22:00")
+        end = Adw.EntryRow(title="To (HH:MM)", text=rule.end or "07:00")
+        for r in (start, end):
+            timed.bind_property("active", r, "visible", GObject_SYNC)
+        for r in (preset_row, power_row, timed, start, end):
+            box.append(r)
+
+        dialog = Adw.AlertDialog(heading="Edit rule" if index is not None else "New rule",
+                                 extra_child=box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+
+        def done(_d, response):
+            if response != "save":
+                return
+            new = Rule(names[preset_row.get_selected()], POWER_CHOICES[power_row.get_selected()],
+                       start.get_text().strip() if timed.get_active() else None,
+                       end.get_text().strip() if timed.get_active() else None)
+            try:
+                new.validate()
+            except ValueError as e:
+                self.win.toast(str(e))
+                return
+            old = list(self.rules)
+            if index is None:
+                self.rules.append(new)
+            else:
+                self.rules[index] = new
+            if not self._save():
+                self.rules = old
+        dialog.connect("response", done)
+        dialog.present(self.win)
+
+
 class PrismWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Prism", default_width=860, default_height=900)
@@ -516,6 +692,8 @@ class PrismWindow(Adw.ApplicationWindow):
                                        "prism-power-profile-performance-symbolic")
         else:
             self.performance = None
+        self.automation = AutomationPage(self)
+        stack.add_titled_with_icon(self.automation, "automation", "Automation", "prism-time-symbolic")
         header.set_title_widget(Adw.ViewSwitcher(stack=stack, policy=Adw.ViewSwitcherPolicy.WIDE))
         menu = Gio.Menu()
         menu.append("About Prism", "app.about")
@@ -532,6 +710,7 @@ class PrismWindow(Adw.ApplicationWindow):
         self.lighting.refresh()
         if self.performance:
             self.performance.refresh()
+        self.automation.refresh()
 
     def toast(self, text: str):
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=3))

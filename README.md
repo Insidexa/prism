@@ -4,9 +4,9 @@
 A native GNOME app, a Quick Settings tile and a command-line tool, built on the
 community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) driver.
 
-| Lighting | Performance |
-|---|---|
-| ![Lighting page](docs/lighting.png) | ![Performance page](docs/performance.png) |
+| Lighting | Performance | Automation |
+|---|---|---|
+| ![Lighting page](docs/lighting.png) | ![Performance page](docs/performance.png) | ![Automation page](docs/automation.png) |
 
 ## Features
 
@@ -17,6 +17,11 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   Power Mode, live CPU/GPU temperature, CPU load and fan speed, a drag-and-drop fan
   curve editor with a warning for unsafe curves, and CPU power limits (PL1/PL2).
   The discrete GPU is never woken just to read its temperature.
+- **Automation**: switch presets by time of day and power source, e.g. a dim
+  “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
+  checked top to bottom, the first match wins, and colours you change by hand stay
+  until a different rule starts to apply. Runs as a small user service, so it works
+  with the app closed.
 - **Quick Settings tile**: lighting on/off, brightness, effect and presets, plus a
   Max Fans toggle, right in GNOME's top-bar menu.
 - **CLI** for scripts and shortcuts.
@@ -89,12 +94,16 @@ prism effect breathing --speed 4
 prism preset list | apply Ice | save "My look" | delete "My look"
 prism profile performance      # silent | normal | performance
 prism maxfan on
+prism auto status | on | off    # automatic presets (rules are edited in the app)
 ```
 
 Effects: static, breathing, rainbow, wave, pulse, chase, sparkle, candle, aurora,
 disco, gradient, spectrum.
 
-Presets live in `~/.config/prism/presets.json`.
+Presets live in `~/.config/prism/presets.json`, automation rules in
+`~/.config/prism/automation.json`. The rules are applied by the
+`prism-automation` user service, which `make install` enables
+(`systemctl --user status prism-automation`).
 
 ## Development
 
@@ -110,6 +119,7 @@ Layout:
 prism/backend.py    all driver reads/writes and value validation
 prism/sensors.py    temperatures and load (k10temp, amdgpu, /proc/stat)
 prism/presets.py    built-in and saved presets
+prism/automation.py time/power rules and the background service
 prism/cli.py        the `prism` command
 prism/app.py        GTK4/libadwaita app
 prism/widgets.py    keyboard preview, fan curve editor, sparklines

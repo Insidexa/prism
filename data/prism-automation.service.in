@@ -1,0 +1,10 @@
+[Unit]
+Description=Prism automatic keyboard presets (time of day and power source)
+
+[Service]
+ExecStart=@BINDIR@/prism daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

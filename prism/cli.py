@@ -51,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
+    s = sub.add_parser("auto", help="automatic presets by time and power source")
+    s.add_argument("action", choices=("status", "on", "off"))
+
+    sub.add_parser("daemon", help="apply automatic presets (run by the prism-automation service)")
     sub.add_parser("gui", help="open the app (default)")
     return p
 
@@ -60,6 +64,10 @@ def run(argv: list[str]) -> int:
     if args.cmd in (None, "gui"):
         from .app import main as gui_main
         return gui_main()
+
+    if args.cmd == "daemon":
+        from .automation import run_daemon
+        return run_daemon()
 
     dev = OmenDevice()
     store = PresetStore()
@@ -102,6 +110,25 @@ def run(argv: list[str]) -> int:
                 print(dev.thermal_profile())
         elif args.cmd == "maxfan":
             dev.set_max_fan(args.state == "on")
+        elif args.cmd == "auto":
+            from datetime import datetime
+
+            from .automation import AutomationStore, on_ac_power, pick
+            auto = AutomationStore()
+            enabled, rules = auto.load()
+            if args.action in ("on", "off"):
+                auto.save(args.action == "on", rules)
+            else:
+                now = datetime.now()
+                ac = on_ac_power()
+                hit = pick(rules, now.hour * 60 + now.minute, ac)
+                print(f"automatic presets: {'on' if enabled else 'off'}")
+                print(f"power: {'plugged in' if ac else 'battery'}")
+                for i, r in enumerate(rules):
+                    mark = "*" if hit and hit[0] == i else " "
+                    print(f" {mark} {i + 1}. {r.preset}  ({r.describe()})")
+                if not rules:
+                    print("   no rules yet: add them in Prism > Automation")
     except (OmenError, ValueError, KeyError) as e:
         print(f"prism: {e.args[0] if e.args else e}", file=sys.stderr)
         return 1
