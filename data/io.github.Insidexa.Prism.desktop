@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Prism
+GenericName=Laptop Lighting and Performance
+Comment=Keyboard lighting, fans and performance modes for HP Omen laptops
+Exec=prism
+Icon=io.github.Insidexa.Prism
+Categories=Settings;HardwareSettings;
+Keywords=omen;rgb;keyboard;lighting;fan;performance;
+StartupNotify=true

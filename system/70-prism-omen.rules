@@ -1,0 +1,4 @@
+# Prism: hand the Omen driver's writable lighting and fan controls to @USER@
+# (the laptop's owner) when the driver binds. Read-only attributes stay so.
+ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="omen-rgb-keyboard", \
+  RUN+="/usr/bin/sh -c 'cd /sys%p && find rgb_zones fan -maxdepth 1 -type f -perm -u=w -exec chown @USER@ {} +'"

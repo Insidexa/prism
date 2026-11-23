@@ -1,0 +1,3 @@
+#!/bin/sh
+# Prism launcher (installed by `make install`).
+PYTHONPATH="@SHAREDIR@${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m prism "$@"

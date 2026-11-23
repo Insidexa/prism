@@ -1,0 +1,7 @@
+{
+  "uuid": "prism-omen@local",
+  "name": "Prism",
+  "description": "Keyboard lighting and Max Fans for HP Omen laptops in Quick Settings. Requires the Prism app.",
+  "shell-version": ["48", "49", "50"],
+  "version": 1
+}
