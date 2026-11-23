@@ -107,7 +107,7 @@ class KeyboardPreview(Gtk.DrawingArea):
 
     def __init__(self, on_select: Callable[[int], None] | None = None):
         super().__init__()
-        self.set_content_height(230)
+        self.set_content_height(250)
         self.set_hexpand(True)
         self.colors: list[RGB] = [(1, 0, 0)] * 4
         self.brightness = 1.0
@@ -180,7 +180,8 @@ class KeyboardPreview(Gtk.DrawingArea):
         cr.stroke()
 
         inner = 16
-        kx, ky, kw, kh = bx + inner, by + inner, bw - 2 * inner, bh - 2 * inner
+        foot = 26  # strip under the keys for the brightness badge
+        kx, ky, kw, kh = bx + inner, by + inner, bw - 2 * inner, bh - 2 * inner - foot + 8
         main_units = max(sum(r[0]) for r in self.ROWS)
         pad_units, gap_units = 4, 0.6
         unit = kw / (main_units + gap_units + pad_units)
@@ -201,30 +202,66 @@ class KeyboardPreview(Gtk.DrawingArea):
                     x += kwid
         self._keys = keys
 
-        if b > 0:
-            for x, y, kwid, kh_, zone in keys:
-                cr.set_source_rgba(*_scale(self._shown[zone], b), 0.10)
-                rounded_rect(cr, x - g, y - g, kwid + g, kh_ + g, 8)
-                cr.fill()
+        # Perceived light: a 15% backlight still reads as dimly lit, not off.
+        k = b ** 0.55 if b > 0 else 0.0
+        if k > 0:
+            # Soft halo leaking around each key, widest at full brightness.
+            for spread, alpha in ((g * 2.6, 0.05), (g * 1.6, 0.08), (g * 0.8, 0.12)):
+                for x, y, kwid, kh_, zone in keys:
+                    cr.set_source_rgba(*self._shown[zone], alpha * k)
+                    rounded_rect(cr, x - spread / 2, y - spread / 2, kwid + spread, kh_ + spread, 8)
+                    cr.fill()
         for x, y, kwid, kh_, zone in keys:
-            c = _scale(self._shown[zone], b)
-            rounded_rect(cr, x + g / 2, y + g / 2, kwid - g, kh_ - g, 5)
-            cr.set_source_rgb(0.13, 0.135, 0.15)
+            c = self._shown[zone]
+            x0, y0, w0, h0 = x + g / 2, y + g / 2, kwid - g, kh_ - g
+            # Keycap: dark plastic tinted by the light shining through it.
+            rounded_rect(cr, x0, y0, w0, h0, 5)
+            base = 0.12
+            cr.set_source_rgb(*(base + (v - base) * 0.22 * k for v in c))
             cr.fill_preserve()
-            cr.set_source_rgba(*c, 0.85)
+            if k > 0:
+                cr.set_source_rgba(*c, 0.35 + 0.6 * k)
+            else:
+                cr.set_source_rgba(1, 1, 1, 0.08)
             cr.set_line_width(1.4)
             cr.stroke()
-            cr.set_source_rgba(*c, 0.55)
-            rounded_rect(cr, x + kwid * 0.3, y + kh_ * 0.42, kwid * 0.4, kh_ * 0.16, 2)
+            # Legend: the brightest part, close to white at full brightness.
+            lx, ly, lw, lh = x + kwid * 0.3, y + kh_ * 0.42, kwid * 0.4, kh_ * 0.16
+            if k > 0:
+                hot = tuple(v + (1 - v) * 0.45 * k for v in c)
+                cr.set_source_rgba(*hot, 0.25 + 0.75 * k)
+            else:
+                cr.set_source_rgba(1, 1, 1, 0.10)
+            rounded_rect(cr, lx, ly, lw, lh, 2)
             cr.fill()
 
         if self.selected is not None:
-            cr.set_source_rgba(1, 1, 1, 0.9)
+            # Accent ring around the selected zone's keys, offset so the zone's own
+            # colour (even white) stays visible.
+            cr.set_source_rgba(0.21, 0.52, 0.89, 0.95)
             cr.set_line_width(2)
             for x, y, kwid, kh_, zone in keys:
                 if zone == self.selected:
-                    rounded_rect(cr, x + g / 2 - 1, y + g / 2 - 1, kwid - g + 2, kh_ - g + 2, 6)
+                    rounded_rect(cr, x + g / 2 - 2.5, y + g / 2 - 2.5, kwid - g + 5, kh_ - g + 5, 7)
                     cr.stroke()
+
+        # Brightness badge
+        label = "Off" if b <= 0 else f"{round(b * 100)}%"
+        cr.select_font_face("Sans", 0, 1)
+        cr.set_font_size(11)
+        ext = cr.text_extents(label)
+        bw_, bh_ = ext.width + 16, 20
+        rx, ry = bx + bw - bw_ - inner, by + bh - bh_ - 8
+        rounded_rect(cr, rx, ry, bw_, bh_, 10)
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.fill()
+        cr.set_source_rgba(1, 1, 1, 0.7)
+        cr.move_to(rx + 8 - ext.x_bearing, ry + bh_ / 2 - ext.y_bearing - ext.height / 2)
+        cr.show_text(label)
+
+    def set_brightness(self, percent: float) -> None:
+        self.brightness = percent / 100
+        self.queue_draw()
 
 
 class Swatch(Gtk.DrawingArea):

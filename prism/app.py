@@ -204,15 +204,14 @@ class LightingPage(Gtk.Box):
     def _brightness_changed(self, scale):
         if self._loading:
             return
+        self.preview.set_brightness(scale.get_value())  # follow the slider live
         # Coalesce slider drags into one firmware call every 80 ms.
         if self._brightness_timer:
             GLib.source_remove(self._brightness_timer)
 
         def commit():
             self._brightness_timer = 0
-            if _run(self.win, self.dev.set_brightness, int(scale.get_value())):
-                self.preview.brightness = scale.get_value() / 100
-                self.preview.queue_draw()
+            _run(self.win, self.dev.set_brightness, int(scale.get_value()))
             return GLib.SOURCE_REMOVE
         self._brightness_timer = GLib.timeout_add(80, commit)
 
