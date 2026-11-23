@@ -1,7 +1,9 @@
 """Prism GTK4/libadwaita app: Lighting and Performance pages."""
 from __future__ import annotations
 
+import queue
 import sys
+import threading
 from pathlib import Path
 
 import gi
@@ -49,14 +51,37 @@ PROFILE_INFO = {
 }
 
 
-def _run(win, fn, *args) -> bool:
-    """Call a backend setter, showing a toast instead of raising."""
-    try:
-        fn(*args)
-        return True
-    except (OmenError, ValueError) as e:
-        win.toast(str(e))
-        return False
+class DeviceWorker:
+    """Runs driver calls on one background thread, in order.
+
+    Firmware calls behind the driver can take hundreds of milliseconds (a fan
+    speed read is ~300 ms), so they must never run on the GTK main thread.
+    Results and errors come back on the main thread via GLib.idle_add.
+    """
+
+    def __init__(self, on_error):
+        self._q: queue.Queue = queue.Queue()
+        self._on_error = on_error
+        threading.Thread(target=self._loop, name="prism-device", daemon=True).start()
+
+    def submit(self, fn, *args, then=None):
+        self._q.put((fn, args, then))
+
+    def _loop(self):
+        while True:
+            fn, args, then = self._q.get()
+            try:
+                result = fn(*args)
+            except (OmenError, ValueError) as e:
+                GLib.idle_add(self._on_error, str(e))
+                continue
+            if then is not None:
+                GLib.idle_add(lambda r=result: (then(r), False)[1])
+
+
+def _run(win, fn, *args, then=None) -> None:
+    """Queue a backend call; `then(result)` runs on the main thread if it succeeds."""
+    win.worker.submit(fn, *args, then=then)
 
 
 class LightingPage(Gtk.Box):
@@ -182,24 +207,21 @@ class LightingPage(Gtk.Box):
         if self._loading:
             return
         color = self._picked_hex()
-        if _run(self.win, self.dev.set_zone, self.zone, color):
-            self.refresh()
+        _run(self.win, self.dev.set_zone, self.zone, color, then=lambda _r: self.refresh())
 
     def _color_to_all(self, _b):
-        if _run(self.win, self.dev.set_all, self._picked_hex()):
-            self.refresh()
+        _run(self.win, self.dev.set_all, self._picked_hex(), then=lambda _r: self.refresh())
 
     def _effect_changed(self, row, _p):
         if self._loading:
             return
-        if _run(self.win, self.dev.set_animation, ANIMATIONS[row.get_selected()]):
-            self.refresh()
+        _run(self.win, self.dev.set_animation, ANIMATIONS[row.get_selected()],
+             then=lambda _r: self.refresh())
 
     def _speed_changed(self, row, _p):
         if self._loading:
             return
-        if _run(self.win, self.dev.set_speed, int(row.get_value())):
-            self.refresh()
+        _run(self.win, self.dev.set_speed, int(row.get_value()), then=lambda _r: self.refresh())
 
     def _brightness_changed(self, scale):
         if self._loading:
@@ -240,9 +262,10 @@ class LightingPage(Gtk.Box):
             self.preset_box.append(btn)
 
     def _apply_preset(self, _b, preset: Preset):
-        if _run(self.win, preset.apply, self.dev):
+        def done(_r):
             self.refresh()
             self.win.toast(f"Applied “{preset.name}”")
+        _run(self.win, preset.apply, self.dev, then=done)
 
     def _save_preset(self, _b):
         entry = Adw.EntryRow(title="Name")
@@ -402,6 +425,8 @@ class PerformancePage(Gtk.Box):
         adv.add(exp)
         page.add(adv)
 
+        self._ticks = 0
+        self._fan_pending = False
         self.sensors.cpu_percent()
         GLib.timeout_add_seconds(1, self._tick)
 
@@ -443,24 +468,39 @@ class PerformancePage(Gtk.Box):
         else:
             busy = g.busy_percent()
             self.gpu_temp.set(g.temp_c(), sub=f"{g.name} · {busy if busy is not None else '–'}% busy")
-        try:
-            cpu, gpu = self.dev.fan_rpm()
-            self.fans.set(max(cpu, gpu), "{:,.0f}", sub=f"CPU {cpu:,} · GPU {gpu:,}")
-            profile = self.dev.thermal_profile()
-            if profile in self.mode_buttons and not self.mode_buttons[profile].get_active():
-                self._loading = True  # changed from GNOME's Power Mode
-                self.mode_buttons[profile].set_active(True)
-                self._loading = False
-        except OmenError:
-            self.fans.set(None, sub="unavailable")
+        # Fan speeds come from firmware (~300 ms each): read them in the
+        # background, at most one read in flight, every other tick.
+        self._ticks += 1
+        if not self._fan_pending and self._ticks % 2 == 0:
+            self._fan_pending = True
+            self.win.worker.submit(self._read_fans, then=self._show_fans)
         return GLib.SOURCE_CONTINUE
+
+    def _read_fans(self):
+        try:
+            return self.dev.fan_rpm(), self.dev.thermal_profile()
+        except OmenError:
+            return None
+
+    def _show_fans(self, result):
+        self._fan_pending = False
+        if result is None:
+            self.fans.set(None, sub="unavailable")
+            return
+        (cpu, gpu), profile = result
+        self.fans.set(max(cpu, gpu), "{:,.0f}", sub=f"CPU {cpu:,} · GPU {gpu:,}")
+        if profile in self.mode_buttons and not self.mode_buttons[profile].get_active():
+            self._loading = True  # changed from GNOME's Power Mode
+            self.mode_buttons[profile].set_active(True)
+            self._loading = False
 
     def _mode_toggled(self, btn, name):
         if self._loading or not btn.get_active():
             return
-        if _run(self.win, self.dev.set_thermal_profile, name):
+        def done(_r):
             self.win.toast(f"{PROFILE_INFO[name][0]} mode")
             self.refresh()
+        _run(self.win, self.dev.set_thermal_profile, name, then=done)
 
     def _max_fan_changed(self, row, _p):
         if not self._loading:
@@ -476,16 +516,21 @@ class PerformancePage(Gtk.Box):
         self.risk.set_revealed(curve_is_risky(points))
 
     def _apply_curve(self, _b):
-        if self._pending_curve and _run(self.win, self.dev.set_fan_curve, self._pending_curve):
+        if not self._pending_curve:
+            return
+
+        def done(_r):
             self.win.toast("Fan curve applied")
             self.refresh()
+        _run(self.win, self.dev.set_fan_curve, self._pending_curve, then=done)
 
     def _set_power(self, limits):
         args = (None, None) if limits is None else limits
-        if _run(self.win, self.dev.set_power_limits, *args):
+        def done(_r):
             self.win.toast("Power limits set to firmware default" if limits is None
                            else f"Power limits: {limits[0]} W / {limits[1]} W")
             self.refresh()
+        _run(self.win, self.dev.set_power_limits, *args, then=done)
 
 
 class AutomationPage(Gtk.Box):
@@ -665,6 +710,7 @@ class PrismWindow(Adw.ApplicationWindow):
         super().__init__(application=app, title="Prism", default_width=860, default_height=900)
         self.dev = OmenDevice()
         self.toasts = Adw.ToastOverlay()
+        self.worker = DeviceWorker(lambda msg: (self.toast(msg), False)[1])
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
         view.add_top_bar(header)
