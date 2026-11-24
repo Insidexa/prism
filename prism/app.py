@@ -958,6 +958,101 @@ class SoundPage(Gtk.Box):
         self._apply(s)
 
 
+class BatteryPage(Gtk.Box):
+    """Battery status, charge history and estimated use per app (prism/battery.py)."""
+
+    def __init__(self, win: "PrismWindow"):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.win = win
+        page = Adw.PreferencesPage()
+        self.append(page)
+
+        now = Adw.PreferencesGroup(title="Battery")
+        self.charge_row = Adw.ActionRow(title="Charge")
+        self.left_row = Adw.ActionRow(title="Time left")
+        self.health_row = Adw.ActionRow(title="Health")
+        self.gpu_row = Adw.ActionRow(title="Discrete GPU")
+        for r in (self.charge_row, self.left_row, self.health_row, self.gpu_row):
+            now.add(r)
+        page.add(now)
+
+        hist = Adw.PreferencesGroup(title="Last 24 hours", description="Charge, from GNOME's power history")
+        self.chart = Sparkline(length=200, lo=0, hi=100)
+        self.chart.set_content_height(70)
+        self.chart.set_margin_top(10)
+        self.chart.set_margin_bottom(10)
+        self.chart.set_margin_start(12)
+        self.chart.set_margin_end(12)
+        card = Gtk.Box(css_classes=["card"])
+        card.append(self.chart)
+        hist.add(card)
+        page.add(hist)
+
+        self.apps = Adw.PreferencesGroup(
+            title="Use per app",
+            description="On battery in the last 24 hours. Estimated from what each app did, as macOS does: "
+                        "no laptop measures power per app.")
+        page.add(self.apps)
+        self._app_rows: list[Gtk.Widget] = []
+
+    def refresh(self) -> None:
+        from . import battery as b
+        import time as _t
+
+        def gather():
+            return (b.info(), b.history("charge", 24, 200), b.dgpu_state(), b.dgpu_users(),
+                    b.usage(b.UsageLog().records(_t.time() - 86400)))
+        self.win.worker.submit(gather, then=self._show)
+
+    def _show(self, data) -> None:
+        i, hist, gpu, users, (total, apps) = data
+        if i is None:
+            self.charge_row.set_subtitle("No battery found")
+            return
+        rate = f" · {i.rate_w:.1f} W" if i.rate_w else ""
+        self.charge_row.set_subtitle(f"{i.percent:.0f} % · {i.status.lower()}{rate}")
+        if i.time_left_h:
+            h, m = int(i.time_left_h), round(i.time_left_h % 1 * 60)
+            self.left_row.set_subtitle(f"{h} h {m} min " + ("left" if i.status == "Discharging" else "to full"))
+        else:
+            self.left_row.set_subtitle("—")
+        if i.health is not None:
+            self.health_row.set_subtitle(f"{i.health:.0f} % of its design capacity ({i.full_wh:.1f} of "
+                                         f"{i.design_wh:.1f} Wh)" + (f" · {i.cycles} cycles" if i.cycles else ""))
+        if gpu is None:
+            self.gpu_row.set_visible(False)
+        else:
+            text = "Asleep (good for the battery)" if gpu != "active" else "Awake"
+            if users:
+                text += " · in use by " + ", ".join(users)
+            self.gpu_row.set_subtitle(GLib.markup_escape_text(text))
+        self.chart.values.clear()
+        pts = [v for _t, v in hist][-200:]
+        for _ in range(200 - len(pts)):
+            self.chart.values.append(None)
+        for v in pts:
+            self.chart.values.append(v)
+        self.chart.queue_draw()
+        for r in self._app_rows:
+            self.apps.remove(r)
+        self._app_rows = []
+        if total <= 0:
+            row = Adw.ActionRow(title="Nothing recorded on battery yet",
+                                subtitle="Prism notes app activity once a minute while unplugged.")
+            self.apps.add(row)
+            self._app_rows.append(row)
+            return
+        for app, wh in apps[:10]:
+            share = wh / total
+            row = Adw.ActionRow(title=GLib.markup_escape_text(app),
+                                subtitle=f"{100 * share:.0f} % · {wh:.1f} Wh")
+            bar = Gtk.LevelBar(min_value=0, max_value=1, value=share, valign=Gtk.Align.CENTER)
+            bar.set_size_request(160, -1)
+            row.add_suffix(bar)
+            self.apps.add(row)
+            self._app_rows.append(row)
+
+
 class PrismWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Prism", default_width=860, default_height=900)
@@ -994,6 +1089,8 @@ class PrismWindow(Adw.ApplicationWindow):
         stack.add_titled_with_icon(self.sound, "sound", "Sound", "prism-speaker-symbolic")
         self.automation = AutomationPage(self)
         stack.add_titled_with_icon(self.automation, "automation", "Automation", "prism-time-symbolic")
+        self.battery = BatteryPage(self)
+        stack.add_titled_with_icon(self.battery, "battery", "Battery", "prism-battery-symbolic")
         header.set_title_widget(Adw.ViewSwitcher(stack=stack, policy=Adw.ViewSwitcherPolicy.WIDE))
         menu = Gio.Menu()
         menu.append("About Prism", "app.about")
@@ -1012,6 +1109,7 @@ class PrismWindow(Adw.ApplicationWindow):
             self.performance.refresh()
         self.automation.refresh()
         self.sound.refresh()
+        self.battery.refresh()
 
     def toast(self, text: str):
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=3))

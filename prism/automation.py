@@ -186,6 +186,9 @@ def run_daemon(interval: float = 15.0) -> int:
     # Music lighting runs here too, so it keeps going with the app closed.
     threading.Thread(target=MusicWatcher(OmenDevice(), log=log, on_ac=on_ac_power).run,
                      daemon=True, name="music").start()
+    from .battery import UsageRecorder
+    # Estimated battery use per app (prism battery, Battery page).
+    threading.Thread(target=UsageRecorder(log=log).run, daemon=True, name="battery").start()
     auto = Automation(OmenDevice(), AutomationStore(), PresetStore(), log=log)
     while True:
         auto.step(datetime.now())

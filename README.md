@@ -38,6 +38,11 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   colours of the current preset. It adjusts itself to the volume, settles back to
   the plain colours when nothing plays, and keeps running with the app closed.
   Needs numpy and a keyboard driver with the live `rgb_zones/frame` file.
+- **Battery**: charge, time left, health and cycles, the last 24 hours of charge,
+  whether the discrete GPU is asleep (and which app keeps it awake), and estimated
+  use per app on battery, like macOS's Battery settings. As on a Mac, use per app
+  is an estimate from each app's CPU and GPU activity: no laptop measures power per
+  app. `prism battery` prints the same.
 - **Automation**: switch presets by time of day and power source, e.g. a dim
   “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
   checked top to bottom, the first match wins, and colours you change by hand stay
@@ -117,6 +122,7 @@ prism preset list | apply Ice | save "My look" [--with-brightness] | delete "My 
 prism profile performance      # silent | normal | performance
 prism maxfan on
 prism music on | off | status [--sensitivity 1.5]   # zones pulse with the sound
+prism battery [--hours 24]     # status, discrete GPU, use per app
 prism auto status | on | off    # automatic presets (rules are edited in the app)
 prism sound list | status | toggle   # toggle: Prism chain <-> EasyEffects, to compare
 prism sound set --engine chain --chain my-tuning --eq Club --bass -3   # bass: dB, -12 = off
@@ -183,6 +189,8 @@ Layout:
 ```
 prism/backend.py    all driver reads/writes and value validation
 prism/sensors.py    temperatures and load (k10temp, amdgpu, /proc/stat)
+prism/battery.py    battery status, history, estimated use per app
+prism/music.py      music lighting
 prism/presets.py    built-in and saved presets
 prism/automation.py time/power rules and the background service
 prism/sound.py      speaker sound settings; composes and applies EasyEffects presets

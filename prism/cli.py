@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
+    s = sub.add_parser("battery", help="battery status, history and estimated use per app")
+    s.add_argument("--hours", type=float, default=24, help="period for use per app (default 24)")
+
     s = sub.add_parser("music", help="keyboard lighting that follows the music playing")
     s.add_argument("action", choices=("on", "off", "status"))
     s.add_argument("--sensitivity", type=float, help="0.5 (calm) to 2 (lively), default 1")
@@ -85,6 +88,9 @@ def run(argv: list[str]) -> int:
     if args.cmd == "daemon":
         from .automation import run_daemon
         return run_daemon()
+
+    if args.cmd == "battery":
+        return battery_report(args.hours)
 
     dev = OmenDevice()
     store = PresetStore()
@@ -224,6 +230,37 @@ def run(argv: list[str]) -> int:
     except (OmenError, ValueError, KeyError) as e:
         print(f"prism: {e.args[0] if e.args else e}", file=sys.stderr)
         return 1
+    return 0
+
+
+def battery_report(hours: float) -> int:
+    import time as _t
+
+    from . import battery as b
+    i = b.info()
+    if i is None:
+        print("prism: no battery found", file=sys.stderr)
+        return 1
+    print(f"battery: {i.percent:.0f}% {i.status.lower()}"
+          + (f", {i.rate_w:.1f} W" if i.rate_w else "")
+          + (f", {int(i.time_left_h)} h {round(i.time_left_h % 1 * 60)} min "
+             + ("left" if i.status == "Discharging" else "to full") if i.time_left_h else ""))
+    if i.health is not None:
+        print(f"health: {i.health:.0f}% of design ({i.full_wh:.1f} of {i.design_wh:.1f} Wh)"
+              + (f", {i.cycles} cycles" if i.cycles is not None else ""))
+    state = b.dgpu_state()
+    if state:
+        users = b.dgpu_users()
+        print(f"discrete GPU: {'awake' if state == 'active' else 'asleep'}"
+              + (f", in use by {', '.join(users)}" if users else ""))
+    total, apps = b.usage(b.UsageLog().records(_t.time() - hours * 3600))
+    if total <= 0:
+        print(f"use per app: nothing recorded on battery in the last {hours:g} h yet")
+        return 0
+    print(f"on battery in the last {hours:g} h: {total:.1f} Wh"
+          + (f" ({100 * total / i.full_wh:.0f}% of a full charge)" if i.full_wh else ""))
+    for app, wh in apps[:12]:
+        print(f"  {100 * wh / total:5.1f}%  {wh:5.1f} Wh  {app}")
     return 0
 
 
