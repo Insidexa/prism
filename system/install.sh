@@ -69,9 +69,10 @@ install -d -m 0755 "$STATE_DIR"
 step "Giving $USER_NAME control of the Omen settings"
 sed "s/@USER@/$USER_NAME/g" "$HERE/70-prism-omen.rules" > /etc/udev/rules.d/70-prism-omen.rules
 chmod 0644 /etc/udev/rules.d/70-prism-omen.rules
-udevadm control --reload-rules
 install -m 0644 "$HERE/71-prism-omen-key.hwdb" /etc/udev/hwdb.d/71-prism-omen-key.hwdb
 systemd-hwdb update
+# udevd keeps the database it loaded: reload it (and the rules) before re-applying.
+udevadm control --reload
 udevadm trigger --subsystem-match=input --action=change
 
 step "Switching drivers"
