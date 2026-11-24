@@ -58,7 +58,7 @@ class SolaarTest(unittest.TestCase):
 
   1: MX Master 3S
      Device path  : None
-     Battery: 85%, discharging.
+     Battery: 85%, BatteryStatus.DISCHARGING.
   2: MX Keys
      Battery: 40%, recharging.
   3: Old mouse

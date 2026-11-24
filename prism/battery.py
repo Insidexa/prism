@@ -378,22 +378,31 @@ def peripherals() -> list[DeviceBattery]:
     return uniq
 
 
+_SOLAAR_CACHE: tuple[float, list] = (0.0, [])
+
+
 def solaar_batteries(text: str | None = None) -> list[DeviceBattery]:
-    """From `solaar show`: one entry per paired device with a battery reading."""
+    """From `solaar show`: one entry per paired device with a battery reading.
+    `solaar show` takes seconds, so readings are kept for two minutes."""
+    global _SOLAAR_CACHE
     from shutil import which
     if text is None:
         if not which("solaar"):
             return []
-        text = _run(["solaar", "show"])
+        if time.monotonic() - _SOLAAR_CACHE[0] < 120:
+            return list(_SOLAAR_CACHE[1])
+        out = solaar_batteries(_run(["solaar", "show"]))
+        _SOLAAR_CACHE = (time.monotonic(), out)
+        return list(out)
     out, name = [], None
     for line in text.splitlines():
         m = re.match(r"\s{0,4}\d+: (.+?)\s*$", line)
         if m and "Receiver" not in m.group(1):
             name = m.group(1)
             continue
-        b = re.search(r"Battery:\s*(\d+)%(?:,\s*([\w ]+))?", line)
+        b = re.search(r"Battery:\s*(\d+)%(?:,\s*(?:BatteryStatus\.)?([\w ]+))?", line)
         if b and name:
-            state = (b.group(2) or "unknown").strip().replace("recharging", "charging")
+            state = (b.group(2) or "unknown").strip().lower().replace("recharging", "charging")
             out.append(DeviceBattery(name, float(b.group(1)), state, "solaar"))
             name = None
     return out

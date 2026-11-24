@@ -1035,11 +1035,17 @@ class BatteryPage(Gtk.Box):
 
         def gather():
             return (b.info(), b.history("charge", 24, 200), b.dgpu_state(), b.dgpu_users(),
-                    b.usage(b.UsageLog().records(_t.time() - 86400)), b.peripherals())
+                    b.usage(b.UsageLog().records(_t.time() - 86400)))
         self.win.worker.submit(gather, then=self._show)
+        # Device batteries can take seconds (Solaar): their own thread, not the shared worker.
+        threading.Thread(target=lambda: GLib.idle_add(self._show_devices, b.peripherals()),
+                         daemon=True).start()
 
     def _show(self, data) -> None:
-        i, hist, gpu, users, (total, apps), devs = data
+        i, hist, gpu, users, (total, apps) = data
+        self._show_data(i, hist, gpu, users, total, apps)
+
+    def _show_devices(self, devs) -> bool:
         for r in self._dev_rows:
             self.devices.remove(r)
         self._dev_rows = []
@@ -1055,6 +1061,9 @@ class BatteryPage(Gtk.Box):
             row = Adw.ActionRow(title="No device batteries found")
             self.devices.add(row)
             self._dev_rows.append(row)
+        return False
+
+    def _show_data(self, i, hist, gpu, users, total, apps) -> None:
         if i is None:
             self.charge_row.set_subtitle("No battery found")
             return
