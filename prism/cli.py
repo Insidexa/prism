@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
+    s = sub.add_parser("sound", help="speaker sound (EasyEffects): base tuning, OMEN equalizer, bass")
+    s.add_argument("action", choices=("status", "set", "list"))
+    s.add_argument("--base", help="an EasyEffects output preset, or 'off'")
+    s.add_argument("--eq", help="an OMEN equalizer preset, or 'none'")
+    s.add_argument("--bass", type=float, help="bass amount (0 = off)")
+
     s = sub.add_parser("auto", help="automatic presets by time and power source")
     s.add_argument("action", choices=("status", "on", "off"))
 
@@ -112,6 +118,30 @@ def run(argv: list[str]) -> int:
                 print(dev.thermal_profile())
         elif args.cmd == "maxfan":
             dev.set_max_fan(args.state == "on")
+        elif args.cmd == "sound":
+            from .sound import (OFF, SoundEngine, base_presets, label, load_eq_presets,
+                                speaker_sink)
+            eng = SoundEngine()
+            cur = eng.current()
+            if args.action == "list":
+                print("bases: off, " + ", ".join(base_presets()))
+                print("equalizers: none, " + ", ".join(load_eq_presets()))
+            elif args.action == "status":
+                sink = speaker_sink()
+                print(f"speakers: {sink[1] if sink else 'not found'}")
+                print(f"sound: {'off' if cur.base == OFF else label(cur.base)}")
+                print(f"equalizer: {cur.eq or 'none'}")
+                print(f"bass: {'preset default' if cur.bass is None else cur.bass}")
+            else:
+                if args.base is not None:
+                    cur.base = args.base
+                if args.eq is not None:
+                    cur.eq = None if args.eq.lower() == "none" else args.eq
+                if args.bass is not None:
+                    cur.bass = args.bass
+                if cur.base != OFF and cur.base not in base_presets():
+                    raise ValueError(f"no EasyEffects preset named {cur.base!r} (see: prism sound list)")
+                print(eng.apply(cur))
         elif args.cmd == "auto":
             from datetime import datetime
 

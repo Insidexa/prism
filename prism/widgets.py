@@ -478,3 +478,48 @@ class FanCurveEditor(Gtk.DrawingArea):
             cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
             cr.move_to(x - 14, y - 10)
             cr.show_text(f"{t}°·{p}%")
+
+
+class EqBars(Gtk.DrawingArea):
+    """Gain per band as bars around a 0 dB line, labelled with frequencies."""
+
+    def __init__(self):
+        super().__init__()
+        self.set_content_height(120)
+        self.set_hexpand(True)
+        self.bands: list[int] = []
+        self.gains: list[float] = []
+        self.set_draw_func(self._draw)
+
+    def set(self, bands: list[int], gains: list[float] | None) -> None:
+        self.bands, self.gains = bands, gains or [0.0] * len(bands)
+        self.queue_draw()
+
+    def _draw(self, _a, cr, w, h):
+        if not self.bands:
+            return
+        fg = self.get_color()
+        top, bottom = 8, h - 20
+        mid = (top + bottom) / 2
+        span = 12.0  # ±12 dB
+        n = len(self.bands)
+        slot = w / n
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.25)
+        cr.set_line_width(1)
+        cr.move_to(0, mid)
+        cr.line_to(w, mid)
+        cr.stroke()
+        cr.select_font_face("Sans")
+        cr.set_font_size(9)
+        for i, (f, g) in enumerate(zip(self.bands, self.gains)):
+            x = i * slot + slot * 0.25
+            bw = slot * 0.5
+            y = mid - (max(-span, min(span, g)) / span) * (mid - top)
+            rounded_rect(cr, x, min(y, mid), bw, max(1.5, abs(y - mid)), 3)
+            cr.set_source_rgba(0.21, 0.52, 0.89, 0.9 if g >= 0 else 0.5)
+            cr.fill()
+            text = f"{f // 1000}k" if f >= 1000 else str(f)
+            ext = cr.text_extents(text)
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.6)
+            cr.move_to(i * slot + slot / 2 - ext.width / 2, h - 5)
+            cr.show_text(text)

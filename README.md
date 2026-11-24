@@ -18,6 +18,12 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   Power Mode, live CPU/GPU temperature, CPU load and fan speed, a drag-and-drop fan
   curve editor with a warning for unsafe curves, and CPU power limits (PL1/PL2).
   The discrete GPU is never woken just to read its temperature.
+- **Sound**: speaker tuning through EasyEffects, for the built-in speakers only
+  (headphones, HDMI and Bluetooth are left alone). Pick any installed speaker preset,
+  add one of the 13 OMEN Audio Control equalizer curves and set the virtual-bass
+  amount. Prism ships no proprietary tuning: it uses the presets installed in
+  EasyEffects, and reads equalizer curves from `~/.local/share/prism-sound/eq_presets.json`
+  (`{"bands_hz": [...], "presets_db": {"Name": [dB per band]}}`) if present.
 - **Automation**: switch presets by time of day and power source, e.g. a dim
   “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
   checked top to bottom, the first match wins, and colours you change by hand stay
@@ -96,6 +102,8 @@ prism preset list | apply Ice | save "My look" [--with-brightness] | delete "My 
 prism profile performance      # silent | normal | performance
 prism maxfan on
 prism auto status | on | off    # automatic presets (rules are edited in the app)
+prism sound list | status
+prism sound set --base "Omen 16 Speakers" --eq Club --bass 3   # or --base off, --eq none
 ```
 
 Effects: static, breathing, rainbow, wave, pulse, chase, sparkle, candle, aurora,
@@ -121,6 +129,7 @@ prism/backend.py    all driver reads/writes and value validation
 prism/sensors.py    temperatures and load (k10temp, amdgpu, /proc/stat)
 prism/presets.py    built-in and saved presets
 prism/automation.py time/power rules and the background service
+prism/sound.py      speaker sound: composes and applies EasyEffects presets
 prism/cli.py        the `prism` command
 prism/app.py        GTK4/libadwaita app
 prism/widgets.py    keyboard preview, fan curve editor, sparklines

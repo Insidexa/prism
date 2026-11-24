@@ -21,7 +21,10 @@ from .automation import (EXAMPLE_RULES, POWER_CHOICES, POWER_LABELS,  # noqa: E4
                          AutomationStore, Rule, on_ac_power, pick)
 from .presets import Preset, PresetStore  # noqa: E402
 from .sensors import Sensors  # noqa: E402
-from .widgets import (FanCurveEditor, KeyboardPreview, Sparkline, Swatch,  # noqa: E402
+from .sound import (OFF, SoundEngine, base_presets, easyeffects_available,  # noqa: E402
+                    easyeffects_running,
+                    eq_bands_hz, label, load_eq_presets)
+from .widgets import (EqBars, FanCurveEditor, KeyboardPreview, Sparkline, Swatch,  # noqa: E402
                       rgb_to_hex)
 
 CSS = b"""
@@ -712,6 +715,152 @@ class AutomationPage(Gtk.Box):
         dialog.present(self.win)
 
 
+class SoundPage(Gtk.Box):
+    """Speaker sound through EasyEffects: base tuning, OMEN equalizer, bass."""
+
+    def __init__(self, win: "PrismWindow"):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.win = win
+        self.engine = SoundEngine()
+        self._loading = False
+        self._bass_timer = 0
+        page = Adw.PreferencesPage()
+        self.append(page)
+
+        if not easyeffects_available():
+            page.add(Adw.PreferencesGroup())
+            self.append(Adw.StatusPage(icon_name="prism-speaker-symbolic", title="EasyEffects is not installed",
+                                       description="Prism uses it for the speaker sound.\n"
+                                                   "<tt>sudo dnf install easyeffects</tt>"))
+            page.set_visible(False)
+            return
+
+        main = Adw.PreferencesGroup(
+            title="Built-in speakers",
+            description="Applied with EasyEffects to the laptop speakers only. "
+                        "Headphones, HDMI and Bluetooth are left untouched.")
+        self.bases: list[str] = []
+        self.base_row = Adw.ComboRow(title="Sound")
+        self.base_row.connect("notify::selected", self._changed)
+        main.add(self.base_row)
+
+        self.eq_names = list(load_eq_presets())
+        self.eq_row = Adw.ComboRow(title="Equalizer", subtitle="OMEN Audio Control presets",
+                                   model=Gtk.StringList.new(["None"] + self.eq_names))
+        self.eq_row.connect("notify::selected", self._changed)
+        main.add(self.eq_row)
+
+        self.bass = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 8, 0.5)
+        self.bass.set_hexpand(True)
+        self.bass.set_size_request(220, -1)
+        self.bass.set_valign(Gtk.Align.CENTER)
+        self.bass.set_draw_value(True)
+        self.bass.set_value_pos(Gtk.PositionType.LEFT)
+        self.bass.connect("value-changed", self._bass_moved)
+        reset = Gtk.Button(icon_name="prism-undo-symbolic", tooltip_text="Use the preset's own bass",
+                           valign=Gtk.Align.CENTER, css_classes=["flat"])
+        reset.connect("clicked", self._bass_reset)
+        self.bass_row = Adw.ActionRow(title="Bass", subtitle="Virtual bass: harmonics the small speakers can play")
+        self.bass_row.add_suffix(self.bass)
+        self.bass_row.add_suffix(reset)
+        main.add(self.bass_row)
+        self.status_row = Adw.ActionRow(title="Status")
+        main.add(self.status_row)
+        page.add(main)
+
+        self.eq_group = Adw.PreferencesGroup(title="Equalizer curve")
+        self.bars = EqBars()
+        frame = Gtk.Box(css_classes=["card"])
+        frame.append(self.bars)
+        self.eq_group.add(frame)
+        page.add(self.eq_group)
+        if not self.eq_names:
+            self.eq_row.set_visible(False)
+            self.eq_group.set_visible(False)
+
+    def refresh(self) -> None:
+        if not hasattr(self, "base_row"):
+            return
+        self._loading = True
+        self.bases = base_presets()
+        self.base_row.set_model(Gtk.StringList.new(["Off"] + [label(b) for b in self.bases]))
+        cur = self.engine.current()
+        self.base_row.set_selected(0 if cur.base == OFF or cur.base not in self.bases
+                                   else self.bases.index(cur.base) + 1)
+        self.eq_row.set_selected(self.eq_names.index(cur.eq) + 1 if cur.eq in self.eq_names else 0)
+        self.bass.set_value(cur.bass if cur.bass is not None else self._preset_bass(cur.base))
+        self._sync_sensitivity()
+        self._loading = False
+        self.win.worker.submit(easyeffects_running, then=lambda up: self.status_row.set_subtitle(
+            "EasyEffects is running" if up else "EasyEffects is not running: it starts on the next change"))
+
+    def _preset_bass(self, base: str) -> float:
+        from .sound import base_bass
+        try:
+            v = base_bass(self.engine.read_preset(base)) if base != OFF else None
+        except (OSError, ValueError):
+            v = None
+        return v if v is not None else 0.0
+
+    def _sync_sensitivity(self):
+        on = self.base_row.get_selected() > 0
+        self.eq_row.set_sensitive(on)
+        self.bass_row.set_sensitive(on)
+        sel = self.eq_row.get_selected()
+        gains = load_eq_presets().get(self.eq_names[sel - 1]) if sel > 0 else None
+        self.bars.set(eq_bands_hz(), gains)
+
+    def _settings(self, bass_from_slider: bool):
+        cur = self.engine.current()
+        i = self.base_row.get_selected()
+        cur.base = OFF if i == 0 else self.bases[i - 1]
+        j = self.eq_row.get_selected()
+        cur.eq = self.eq_names[j - 1] if j > 0 else None
+        if bass_from_slider:
+            cur.bass = float(self.bass.get_value())
+        return cur
+
+    def _apply(self, settings):
+        self.status_row.set_subtitle("Applying…")
+
+        def done(msg):
+            self.status_row.set_subtitle(msg[:1].upper() + msg[1:])
+        self.win.worker.submit(self.engine.apply, settings, then=done)
+
+    def _changed(self, *_):
+        if self._loading:
+            return
+        prev_base = self.engine.current().base
+        s = self._settings(bass_from_slider=False)
+        if s.base != prev_base:
+            s.bass = None  # new tuning: start from its own bass
+            self._loading = True
+            self.bass.set_value(self._preset_bass(s.base))
+            self._loading = False
+        self._sync_sensitivity()
+        self._apply(s)
+
+    def _bass_moved(self, _scale):
+        if self._loading:
+            return
+        if self._bass_timer:
+            GLib.source_remove(self._bass_timer)
+
+        def commit():
+            self._bass_timer = 0
+            self._apply(self._settings(bass_from_slider=True))
+            return GLib.SOURCE_REMOVE
+        self._bass_timer = GLib.timeout_add(300, commit)
+
+    def _bass_reset(self, _b):
+        s = self._settings(bass_from_slider=False)
+        s.bass = None
+        self._loading = True
+        self.bass.set_value(self._preset_bass(s.base))
+        self._loading = False
+        self._apply(s)
+
+
 class PrismWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Prism", default_width=860, default_height=900)
@@ -744,6 +893,8 @@ class PrismWindow(Adw.ApplicationWindow):
                                        "prism-power-profile-performance-symbolic")
         else:
             self.performance = None
+        self.sound = SoundPage(self)
+        stack.add_titled_with_icon(self.sound, "sound", "Sound", "prism-speaker-symbolic")
         self.automation = AutomationPage(self)
         stack.add_titled_with_icon(self.automation, "automation", "Automation", "prism-time-symbolic")
         header.set_title_widget(Adw.ViewSwitcher(stack=stack, policy=Adw.ViewSwitcherPolicy.WIDE))
@@ -763,6 +914,7 @@ class PrismWindow(Adw.ApplicationWindow):
         if self.performance:
             self.performance.refresh()
         self.automation.refresh()
+        self.sound.refresh()
 
     def toast(self, text: str):
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=3))
