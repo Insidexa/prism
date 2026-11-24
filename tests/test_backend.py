@@ -127,6 +127,19 @@ class PresetTests(Tmp):
         self.assertEqual(self.dev.animation(), "breathing")
         self.assertEqual(self.dev.brightness(), 40)
 
+    def test_apply_keeps_brightness_unless_preset_has_one(self):
+        self.dev.set_brightness(42)
+        Preset("x", ["#010203"] * 4, animation="wave").apply(self.dev)
+        self.assertEqual(self.dev.brightness(), 42)
+        self.assertEqual(self.dev.animation(), "wave")
+        Preset("y", ["#010203"] * 4, brightness=10).apply(self.dev)
+        self.assertEqual(self.dev.brightness(), 10)
+
+    def test_capture_brightness_is_opt_in(self):
+        self.dev.set_brightness(70)
+        self.assertIsNone(Preset.capture("a", self.dev).brightness)
+        self.assertEqual(Preset.capture("b", self.dev, with_brightness=True).brightness, 70)
+
     def test_store_round_trip_and_override(self):
         store = PresetStore(self.base / "cfg" / "presets.json")
         self.assertEqual(len(store.all()), len(BUILTIN))
@@ -168,8 +181,11 @@ class CliTests(Tmp):
         self.assertEqual(self.run_cli("effect", "rainbow", "--speed", "4")[0], 0)
         self.assertEqual(self.dev.animation(), "rainbow")
         self.assertEqual(self.run_cli("color", "1", "00ff00")[0], 0)
+        self.dev.set_brightness(35)
         self.assertEqual(self.run_cli("preset", "apply", "focus")[0], 0)
-        self.assertEqual(self.dev.brightness(), 60)
+        self.assertEqual(self.dev.brightness(), 35)  # presets keep your brightness
+        self.assertEqual(self.run_cli("preset", "apply", "night")[0], 0)
+        self.assertEqual(self.dev.brightness(), 25)  # unless they carry one
         self.assertEqual(self.run_cli("maxfan", "on")[0], 0)
         self.assertTrue(self.dev.max_fan())
 

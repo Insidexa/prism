@@ -251,6 +251,8 @@ class LightingPage(Gtk.Box):
             box.append(Swatch(p.zones, (96, 14)))
             fx = EFFECT_LABELS[p.animation]
             label = p.name if p.animation == "static" or fx in p.name else f"{p.name} · {fx}"
+            if p.brightness is not None:
+                label += f" · {p.brightness}%"
             box.append(Gtk.Label(label=label, xalign=0, css_classes=["caption"]))
             btn = Gtk.Button(child=box, css_classes=["preset-btn"])
             btn.connect("clicked", self._apply_preset, p)
@@ -269,9 +271,14 @@ class LightingPage(Gtk.Box):
 
     def _save_preset(self, _b):
         entry = Adw.EntryRow(title="Name")
+        keep = Adw.SwitchRow(title="Include brightness",
+                             subtitle="Off: applying it keeps the brightness you have")
+        box = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE)
+        box.append(entry)
+        box.append(keep)
         dialog = Adw.AlertDialog(heading="Save preset",
-                                 body="Saves the current colours, effect, speed and brightness.",
-                                 extra_child=entry)
+                                 body="Saves the current colours, effect and speed.",
+                                 extra_child=box)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("save", "Save")
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
@@ -282,7 +289,7 @@ class LightingPage(Gtk.Box):
             if response != "save" or not name:
                 return
             try:
-                self.store.save(Preset.capture(name, self.dev))
+                self.store.save(Preset.capture(name, self.dev, keep.get_active()))
             except (OmenError, ValueError) as e:
                 self.win.toast(str(e))
                 return

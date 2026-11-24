@@ -18,7 +18,9 @@ def config_dir() -> Path:
 class Preset:
     name: str
     zones: list[str]
-    brightness: int = 100
+    # None keeps whatever brightness the keyboard has; a number sets it.
+    # Only presets whose point is the level (Night, Battery Saver) carry one.
+    brightness: int | None = None
     animation: str = "static"
     speed: int = 3
 
@@ -28,19 +30,23 @@ class Preset:
         self.zones = [normalize_color(c) for c in self.zones]
         if self.animation not in ANIMATIONS:
             raise ValueError(f"preset {self.name!r} has unknown effect {self.animation!r}")
+        if self.brightness is not None and not 0 <= int(self.brightness) <= 100:
+            raise ValueError(f"preset {self.name!r} brightness must be 0-100")
 
     def apply(self, dev: OmenDevice) -> None:
         # Colours first: effects such as breathing animate the stored colours.
         dev.set_animation("static")
         dev.set_zones(self.zones)
-        dev.set_brightness(self.brightness)
+        if self.brightness is not None:
+            dev.set_brightness(self.brightness)
         dev.set_speed(self.speed)
         if self.animation != "static":
             dev.set_animation(self.animation)
 
     @classmethod
-    def capture(cls, name: str, dev: OmenDevice) -> "Preset":
-        return cls(name, dev.zones(), dev.brightness(), dev.animation(), dev.speed())
+    def capture(cls, name: str, dev: OmenDevice, with_brightness: bool = False) -> "Preset":
+        return cls(name, dev.zones(), dev.brightness() if with_brightness else None,
+                   dev.animation(), dev.speed())
 
 
 BUILTIN = [
@@ -48,7 +54,7 @@ BUILTIN = [
     Preset("Ice", ["#00c8ff", "#3a7bff", "#3a7bff", "#00c8ff"]),
     Preset("Toxic", ["#39ff14", "#00ff88", "#00ff88", "#39ff14"]),
     Preset("Synthwave", ["#ff00c8", "#a000ff", "#3c00ff", "#00c8ff"]),
-    Preset("Focus", ["#ffffff", "#ffffff", "#ffffff", "#ffffff"], brightness=60),
+    Preset("Focus", ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]),
     Preset("Spectrum", ["#ff0000", "#00ff00", "#0000ff", "#ff00ff"], animation="spectrum", speed=2),
     Preset("Fireplace", ["#ff6a00", "#ff4500", "#ff4500", "#ff6a00"], animation="candle", speed=4),
     Preset("Northern Lights", ["#00ff99", "#00ccff", "#7a00ff", "#00ff99"], animation="aurora", speed=3),

@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=("list", "apply", "save", "delete"))
     s.add_argument("name", nargs="?")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--with-brightness", action="store_true",
+                   help="save: also store the current brightness (otherwise applying keeps it)")
 
     s = sub.add_parser("profile", help="get or set the thermal profile")
     s.add_argument("name", nargs="?", choices=THERMAL_PROFILES)
@@ -100,7 +102,7 @@ def run(argv: list[str]) -> int:
                 store.get(args.name).apply(dev)
             elif args.action == "save":
                 from .presets import Preset
-                store.save(Preset.capture(args.name, dev))
+                store.save(Preset.capture(args.name, dev, args.with_brightness))
             else:
                 store.delete(args.name)
         elif args.cmd == "profile":

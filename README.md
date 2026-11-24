@@ -12,7 +12,8 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
 
 - **Lighting**: live keyboard preview (click a key to pick its zone), per-zone colours
   for the 4 hardware zones (WASD, Left, Middle, Right), 12 effects with speed,
-  brightness, and presets you can save.
+  brightness, and presets you can save. Presets keep your current brightness
+  unless they were saved with it (the built-in Night and Battery Saver dim on purpose).
 - **Performance**: Quiet / Balanced / Performance modes that stay in sync with GNOME's
   Power Mode, live CPU/GPU temperature, CPU load and fan speed, a drag-and-drop fan
   curve editor with a warning for unsafe curves, and CPU power limits (PL1/PL2).
@@ -91,7 +92,7 @@ prism color all 00c8ff         # whole keyboard
 prism color 3 ffffff           # one zone: 3 WASD, 2 Left, 1 Middle, 0 Right
 prism brightness 60
 prism effect breathing --speed 4
-prism preset list | apply Ice | save "My look" | delete "My look"
+prism preset list | apply Ice | save "My look" [--with-brightness] | delete "My look"
 prism profile performance      # silent | normal | performance
 prism maxfan on
 prism auto status | on | off    # automatic presets (rules are edited in the app)
