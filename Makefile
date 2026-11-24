@@ -6,7 +6,14 @@ EXT_UUID  := prism-omen@local
 EXT_DIR   := $(SHARE)/gnome-shell/extensions/$(EXT_UUID)
 UNIT_DIR  := $(HOME)/.config/systemd/user
 
-.PHONY: test install uninstall run
+.PHONY: test install uninstall run dsp
+
+LADSPA_DIR := $(PREFIX)/lib/ladspa
+
+dsp: dsp/prism_bass.so
+
+dsp/prism_bass.so: dsp/prism_bass.c
+	$(CC) -O2 -Wall -Wextra -fPIC -shared -o $@ $< -lm
 
 test:
 	python3 -m unittest discover -s tests -t . -v
@@ -14,7 +21,9 @@ test:
 run:
 	python3 -m prism
 
-install:
+install: dsp
+	install -d $(LADSPA_DIR)
+	install -m 0755 dsp/prism_bass.so $(LADSPA_DIR)/
 	rm -rf $(SHARE)/prism
 	install -d $(SHARE)/prism $(PREFIX)/bin $(SHARE)/applications $(SHARE)/icons/hicolor/scalable/apps
 	cp -r prism data $(SHARE)/prism/
@@ -39,6 +48,6 @@ uninstall:
 	-gnome-extensions disable $(EXT_UUID) 2>/dev/null
 	-systemctl --user disable --now prism-automation.service 2>/dev/null
 	rm -f $(UNIT_DIR)/prism-automation.service
-	rm -rf $(SHARE)/prism $(PREFIX)/bin/prism $(EXT_DIR) \
+	rm -rf $(SHARE)/prism $(PREFIX)/bin/prism $(EXT_DIR) $(LADSPA_DIR)/prism_bass.so \
 		$(SHARE)/applications/io.github.Insidexa.Prism.desktop \
 		$(SHARE)/icons/hicolor/scalable/apps/io.github.Insidexa.Prism.svg
