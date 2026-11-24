@@ -39,7 +39,8 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   until a different rule starts to apply. Runs as a small user service, so it works
   with the app closed.
 - **Quick Settings tile**: lighting on/off, brightness, effect and presets, plus a
-  Max Fans toggle, right in GNOME's top-bar menu.
+  Max Fans toggle and a Prism Sound toggle (Prism chain on, EasyEffects off: an
+  A/B switch at the same loudness), right in GNOME's top-bar menu.
 - **CLI** for scripts and shortcuts.
 - **No sudo in daily use**: a one-time install hands the driver's controls to you.
 
@@ -111,7 +112,7 @@ prism preset list | apply Ice | save "My look" [--with-brightness] | delete "My 
 prism profile performance      # silent | normal | performance
 prism maxfan on
 prism auto status | on | off    # automatic presets (rules are edited in the app)
-prism sound list | status
+prism sound list | status | toggle   # toggle: Prism chain <-> EasyEffects, to compare
 prism sound set --engine chain --chain my-tuning --eq Club --bass -3   # bass: dB, -12 = off
 prism sound set --engine easyeffects --base "Omen 16 Speakers" --bass 3 # or --base off, --eq none
 ```

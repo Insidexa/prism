@@ -1,4 +1,4 @@
-// Prism Quick Settings: keyboard lighting tile and a Max fans toggle.
+// Prism Quick Settings: keyboard lighting tile, Max fans and the speaker sound toggle.
 // All changes go through the `prism` command, so validation lives in one place.
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
@@ -168,6 +168,30 @@ class MaxFanToggle extends QuickToggle {
     }
 });
 
+// Speaker sound: on = the Prism chain, off = EasyEffects. Same loudness either
+// way, so it doubles as an A/B switch for comparing the two.
+const SoundToggle = GObject.registerClass(
+class SoundToggle extends QuickToggle {
+    _init(ext) {
+        super._init({title: 'Prism Sound', gicon: ext.icon('prism-speaker-symbolic'), toggleMode: false});
+        this._busy = false;
+        this.connect('clicked', async () => {
+            if (this._busy)
+                return;
+            this._busy = true;
+            this.subtitle = 'Switching…';
+            await ext.command(['sound', 'set', '--engine', this.checked ? 'easyeffects' : 'chain']);
+            this._busy = false;
+        });
+    }
+
+    sync(snd) {
+        this.checked = snd.engine === 'chain';
+        if (!this._busy)
+            this.subtitle = this.checked ? (snd.chain_label ?? 'Prism chain') : 'EasyEffects';
+    }
+});
+
 const PrismIndicator = GObject.registerClass(
 class PrismIndicator extends SystemIndicator {
     _init(ext) {
@@ -179,10 +203,16 @@ class PrismIndicator extends SystemIndicator {
 
         this._lighting = new LightingToggle(ext);
         this._maxFan = new MaxFanToggle(ext);
-        this.quickSettingsItems.push(this._lighting, this._maxFan);
+        this._sound = new SoundToggle(ext);
+        this._sound.visible = false;
+        this.quickSettingsItems.push(this._lighting, this._maxFan, this._sound);
     }
 
     sync(st) {
+        const snd = st?.sound;
+        this._sound.visible = !!snd?.can_switch;
+        if (snd?.can_switch)
+            this._sound.sync(snd);
         const ok = st && st.present;
         this._lighting.visible = !!ok;
         this._maxFan.visible = !!ok && st.max_fan !== undefined;

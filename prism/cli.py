@@ -54,7 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("state", choices=("on", "off"))
 
     s = sub.add_parser("sound", help="speaker sound: Prism chain or EasyEffects, OMEN equalizer, bass")
-    s.add_argument("action", choices=("status", "set", "list"))
+    s.add_argument("action", choices=("status", "set", "list", "toggle"),
+                   help="toggle: switch between the Prism chain and EasyEffects (to compare)")
     s.add_argument("--engine", choices=("chain", "easyeffects"),
                    help="chain: Prism's PipeWire chain; easyeffects: an EasyEffects preset")
     s.add_argument("--chain", help="a Prism chain profile (engine chain)")
@@ -87,6 +88,7 @@ def run(argv: list[str]) -> int:
         if args.cmd == "status":
             st = status(dev)
             if args.json:
+                st["sound"] = sound_status()
                 print(json.dumps(st))
             else:
                 for k, v in st.items():
@@ -145,6 +147,11 @@ def run(argv: list[str]) -> int:
                     print(f"sound: {'off' if cur.base == OFF else label(cur.base)}")
                     print(f"bass: {'preset default' if cur.bass is None else cur.bass}")
                 print(f"equalizer: {cur.eq or 'none'}")
+            elif args.action == "toggle":
+                if not chains:
+                    raise ValueError("no Prism chain profile installed (see: prism sound list)")
+                cur.engine = "easyeffects" if cur.engine == CHAIN else CHAIN
+                print(eng.apply(cur))
             else:
                 if args.engine is not None:
                     cur.engine = args.engine
@@ -185,6 +192,17 @@ def run(argv: list[str]) -> int:
         print(f"prism: {e.args[0] if e.args else e}", file=sys.stderr)
         return 1
     return 0
+
+
+def sound_status() -> dict:
+    """Speaker engine, for the Quick Settings tile (cheap: no PipeWire calls)."""
+    from .chain import CHAIN, load_chains
+    from .sound import SoundStore, easyeffects_available
+    chains = load_chains()
+    s = SoundStore().load()
+    name = s.chain if s.chain in chains else next(iter(chains), None)
+    return {"engine": s.engine, "chain_label": chains[name].label if name else None,
+            "can_switch": bool(chains) and easyeffects_available()}
 
 
 def main() -> int:
