@@ -277,6 +277,8 @@ def battery_report(hours: float) -> int:
         users = b.dgpu_users()
         print(f"discrete GPU: {'awake' if state == 'active' else 'asleep'}"
               + (f", in use by {', '.join(users)}" if users else ""))
+    for d in b.peripherals():
+        print(f"{d.name}: {d.percent:.0f}% {d.state}")
     total, apps = b.usage(b.UsageLog().records(_t.time() - hours * 3600))
     if total <= 0:
         print(f"use per app: nothing recorded on battery in the last {hours:g} h yet")

@@ -343,3 +343,57 @@ def _run(cmd: list[str]) -> str:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
+
+
+# --------------------------------------------------------------------------- other devices
+@dataclass
+class DeviceBattery:
+    name: str
+    percent: float | None
+    state: str        # charging, discharging, full, unknown
+    source: str       # upower or solaar
+
+
+def peripherals() -> list[DeviceBattery]:
+    """Batteries of mice, keyboards and headphones: upower's devices, plus Logitech
+    devices behind a Bolt receiver, which only Solaar can read."""
+    out: list[DeviceBattery] = []
+    for dev in _run(["upower", "-e"]).splitlines():
+        if any(x in dev for x in ("DisplayDevice", "line_power", "battery_BAT")):
+            continue
+        info_ = _run(["upower", "-i", dev])
+        model = re.search(r"model:\s*(.+)", info_)
+        pct = re.search(r"percentage:\s*([\d.]+)%(.*)", info_)
+        state = re.search(r"state:\s*(\S+)", info_)
+        if not model or not pct or "should be ignored" in pct.group(2):
+            continue
+        out.append(DeviceBattery(model.group(1).strip(), float(pct.group(1)),
+                                 state.group(1) if state else "unknown", "upower"))
+    out += solaar_batteries()
+    seen, uniq = set(), []
+    for d in out:
+        if d.name not in seen:
+            seen.add(d.name)
+            uniq.append(d)
+    return uniq
+
+
+def solaar_batteries(text: str | None = None) -> list[DeviceBattery]:
+    """From `solaar show`: one entry per paired device with a battery reading."""
+    from shutil import which
+    if text is None:
+        if not which("solaar"):
+            return []
+        text = _run(["solaar", "show"])
+    out, name = [], None
+    for line in text.splitlines():
+        m = re.match(r"\s{0,4}\d+: (.+?)\s*$", line)
+        if m and "Receiver" not in m.group(1):
+            name = m.group(1)
+            continue
+        b = re.search(r"Battery:\s*(\d+)%(?:,\s*([\w ]+))?", line)
+        if b and name:
+            state = (b.group(2) or "unknown").strip().replace("recharging", "charging")
+            out.append(DeviceBattery(name, float(b.group(1)), state, "solaar"))
+            name = None
+    return out

@@ -50,6 +50,25 @@ class UsageTest(unittest.TestCase):
         self.assertEqual(apps, [("Screen and system", 0.1)])
 
 
+class SolaarTest(unittest.TestCase):
+    def test_parses_solaar_show(self):
+        text = """Logi Bolt Receiver
+  Device path  : /dev/hidraw2
+  Has 1 paired device(s) out of a maximum of 6.
+
+  1: MX Master 3S
+     Device path  : None
+     Battery: 85%, discharging.
+  2: MX Keys
+     Battery: 40%, recharging.
+  3: Old mouse
+     Battery status unavailable.
+"""
+        got = b.solaar_batteries(text)
+        self.assertEqual([(d.name, d.percent, d.state) for d in got],
+                         [("MX Master 3S", 85.0, "discharging"), ("MX Keys", 40.0, "charging")])
+
+
 class LogTest(unittest.TestCase):
     def test_prune_before_anything_was_recorded(self):
         with tempfile.TemporaryDirectory() as t:

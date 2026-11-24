@@ -1015,6 +1015,13 @@ class BatteryPage(Gtk.Box):
         hist.add(card)
         page.add(hist)
 
+        self.devices = Adw.PreferencesGroup(
+            title="Devices",
+            description="Mice, keyboards and headphones. Logitech devices on a Bolt receiver "
+                        "show up once Solaar is installed (sudo dnf install solaar).")
+        page.add(self.devices)
+        self._dev_rows: list[Gtk.Widget] = []
+
         self.apps = Adw.PreferencesGroup(
             title="Use per app",
             description="On battery in the last 24 hours. Estimated from what each app did, as macOS does: "
@@ -1028,11 +1035,26 @@ class BatteryPage(Gtk.Box):
 
         def gather():
             return (b.info(), b.history("charge", 24, 200), b.dgpu_state(), b.dgpu_users(),
-                    b.usage(b.UsageLog().records(_t.time() - 86400)))
+                    b.usage(b.UsageLog().records(_t.time() - 86400)), b.peripherals())
         self.win.worker.submit(gather, then=self._show)
 
     def _show(self, data) -> None:
-        i, hist, gpu, users, (total, apps) = data
+        i, hist, gpu, users, (total, apps), devs = data
+        for r in self._dev_rows:
+            self.devices.remove(r)
+        self._dev_rows = []
+        for d in devs or []:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(d.name),
+                                subtitle=f"{d.percent:.0f} % · {d.state}" if d.percent is not None else d.state)
+            bar = Gtk.LevelBar(min_value=0, max_value=100, value=d.percent or 0, valign=Gtk.Align.CENTER)
+            bar.set_size_request(160, -1)
+            row.add_suffix(bar)
+            self.devices.add(row)
+            self._dev_rows.append(row)
+        if not self._dev_rows:
+            row = Adw.ActionRow(title="No device batteries found")
+            self.devices.add(row)
+            self._dev_rows.append(row)
         if i is None:
             self.charge_row.set_subtitle("No battery found")
             return
