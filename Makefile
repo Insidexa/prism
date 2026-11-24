@@ -39,6 +39,7 @@ install: dsp
 	-systemctl --user daemon-reload
 	-systemctl --user enable prism-automation.service
 	-systemctl --user restart prism-automation.service
+	-python3 -c 'import sys; sys.path.insert(0, "$(SHARE)/prism"); from prism.desktop import bind_omen_key; bind_omen_key("$(PREFIX)/bin/prism")'
 	-update-desktop-database $(SHARE)/applications 2>/dev/null
 	-gtk-update-icon-cache -q -t $(SHARE)/icons/hicolor 2>/dev/null
 	@echo "Installed. Enable the top-bar tile with: gnome-extensions enable $(EXT_UUID)"
@@ -47,6 +48,7 @@ install: dsp
 uninstall:
 	-gnome-extensions disable $(EXT_UUID) 2>/dev/null
 	-systemctl --user disable --now prism-automation.service 2>/dev/null
+	-python3 -c 'import sys; sys.path.insert(0, "$(SHARE)/prism"); from prism.desktop import unbind_omen_key; unbind_omen_key()'
 	rm -f $(UNIT_DIR)/prism-automation.service
 	rm -rf $(SHARE)/prism $(PREFIX)/bin/prism $(EXT_DIR) $(LADSPA_DIR)/prism_bass.so \
 		$(SHARE)/applications/io.github.Insidexa.Prism.desktop \

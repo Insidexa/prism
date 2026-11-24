@@ -144,6 +144,11 @@ class LightingPage(Gtk.Box):
         self.speed_row.set_title("Speed")
         self.speed_row.connect("notify::value", self._speed_changed)
         fx_group.add(self.speed_row)
+        self.music_row = Adw.SwitchRow(title="Music",
+                                       subtitle="Each zone pulses with part of the sound: bass on the left, "
+                                                "treble on the right")
+        self.music_row.connect("notify::active", self._music_toggled)
+        fx_group.add(self.music_row)
 
         self.bright_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
         self.bright_scale.set_hexpand(True)
@@ -169,7 +174,7 @@ class LightingPage(Gtk.Box):
     # -- state -----------------------------------------------------------------
     def refresh(self) -> None:
         try:
-            zones = self.dev.zones()
+            zones = self.dev.base_zones()  # as set, not dimmed by the brightness
             b, mode, speed = self.dev.brightness(), self.dev.animation(), self.dev.speed()
         except OmenError as e:
             self.win.toast(str(e))
@@ -180,6 +185,12 @@ class LightingPage(Gtk.Box):
         self.effect_row.set_selected(ANIMATIONS.index(mode) if mode in ANIMATIONS else 0)
         self.speed_row.set_value(speed)
         self.bright_scale.set_value(b)
+        from .music import MusicStore, available
+        why = available() or (None if self.dev.has_frame() else "needs the updated keyboard driver")
+        self.music_row.set_active(MusicStore().load().enabled and why is None)
+        self.music_row.set_sensitive(why is None)
+        if why:
+            self.music_row.set_subtitle(f"Not available: {why}")
         self._show_zone_color()
         self._loading = False
 
@@ -207,20 +218,33 @@ class LightingPage(Gtk.Box):
         c = self.color_btn.get_rgba()
         return rgb_to_hex((c.red, c.green, c.blue))
 
+    def _manual(self, fn, *args):
+        """A lighting change by hand: music lighting ends first."""
+        from .music import stop_for_manual_change
+
+        def go():
+            stop_for_manual_change()
+            return fn(*args)
+        _run(self.win, go, then=lambda _r: self.refresh())
+
+    def _music_toggled(self, row, _p):
+        if self._loading:
+            return
+        from .music import set_enabled
+        _run(self.win, set_enabled, row.get_active())
+
     def _color_picked(self, *_):
         if self._loading:
             return
-        color = self._picked_hex()
-        _run(self.win, self.dev.set_zone, self.zone, color, then=lambda _r: self.refresh())
+        self._manual(self.dev.set_zone, self.zone, self._picked_hex())
 
     def _color_to_all(self, _b):
-        _run(self.win, self.dev.set_all, self._picked_hex(), then=lambda _r: self.refresh())
+        self._manual(self.dev.set_all, self._picked_hex())
 
     def _effect_changed(self, row, _p):
         if self._loading:
             return
-        _run(self.win, self.dev.set_animation, ANIMATIONS[row.get_selected()],
-             then=lambda _r: self.refresh())
+        self._manual(self.dev.set_animation, ANIMATIONS[row.get_selected()])
 
     def _speed_changed(self, row, _p):
         if self._loading:
@@ -271,7 +295,12 @@ class LightingPage(Gtk.Box):
         def done(_r):
             self.refresh()
             self.win.toast(f"Applied “{preset.name}”")
-        _run(self.win, preset.apply, self.dev, then=done)
+        from .music import stop_for_manual_change
+
+        def go():
+            stop_for_manual_change()
+            preset.apply(self.dev)
+        _run(self.win, go, then=done)
 
     def _save_preset(self, _b):
         entry = Adw.EntryRow(title="Name")

@@ -11,7 +11,9 @@ for v in $(dkms status "$NAME" 2>/dev/null | sed -n "s|^$NAME/\([^,:]*\).*|\1|p"
 done
 rm -f /etc/modprobe.d/prism-hp-wmi-blacklist.conf \
       /etc/modules-load.d/omen_rgb_keyboard.conf \
-      /etc/udev/rules.d/70-prism-omen.rules
+      /etc/udev/rules.d/70-prism-omen.rules \
+      /etc/udev/hwdb.d/71-prism-omen-key.hwdb
+systemd-hwdb update || true
 udevadm control --reload-rules
 modprobe hp_wmi || true
 echo "Removed. Saved settings are kept in /var/lib/omen-rgb-keyboard; the 'omen' group is left in place."

@@ -1,0 +1,7 @@
+# Installed by Prism (system/install.sh).
+# On some OMEN laptops (OMEN 16-c0xxx, board 8902) the OMEN key, the square key
+# next to the Calculator key, arrives on the built-in keyboard as the unknown
+# scancode 0xab rather than as an HP WMI event. Give it a key code so it can be
+# bound: prog1, shown to desktops as XF86Launch1 (Prism binds it to open Prism).
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pnOMEN*:*
+ KEYBOARD_KEY_ab=prog1

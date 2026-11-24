@@ -127,8 +127,9 @@ class Automation:
     """One step of the daemon; separated from the loop so it can be tested."""
 
     def __init__(self, dev: OmenDevice, store: AutomationStore, presets: PresetStore,
-                 power=on_ac_power, log=print):
+                 power=on_ac_power, log=print, music=None):
         self.dev, self.store, self.presets = dev, store, presets
+        self.music = music  # MusicStore; None = the user's
         self.power, self.log = power, log
         self._active: tuple | None = None  # (rule index, rule) last applied
         self._mtime = -1.0
@@ -155,7 +156,18 @@ class Automation:
         if hit is None:
             return None
         try:
-            self.presets.get(hit[1].preset).apply(self.dev)
+            preset = self.presets.get(hit[1].preset)
+            from .music import MusicStore
+            music = self.music or MusicStore()
+            ms = music.load()
+            if ms.enabled:
+                # Music lighting stays on and pulses the preset's colours instead.
+                ms.colors = list(preset.zones)
+                music.save(ms)
+                if preset.brightness is not None:
+                    self.dev.set_brightness(preset.brightness)
+            else:
+                preset.apply(self.dev)
         except (KeyError, OmenError, ValueError) as e:
             self.log(f"could not apply {hit[1].preset!r}: {e}")
             return None
@@ -170,6 +182,10 @@ def run_daemon(interval: float = 15.0) -> int:
     log = lambda m: print(f"prism: {m}", flush=True)  # noqa: E731
     # Keeps the Prism chain on the speakers (after login, headphones, restarts).
     threading.Thread(target=ChainWatcher(log=log).run, daemon=True, name="sound").start()
+    from .music import MusicWatcher
+    # Music lighting runs here too, so it keeps going with the app closed.
+    threading.Thread(target=MusicWatcher(OmenDevice(), log=log, on_ac=on_ac_power).run,
+                     daemon=True, name="music").start()
     auto = Automation(OmenDevice(), AutomationStore(), PresetStore(), log=log)
     while True:
         auto.step(datetime.now())

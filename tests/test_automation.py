@@ -87,13 +87,27 @@ class DaemonTests(unittest.TestCase):
         self.store = AutomationStore(base / "automation.json")
         self.ac = True
         self.logs = []
+        from prism.music import MusicStore
+        self.music = MusicStore(base / "music.json")
         self.auto = Automation(self.dev, self.store, PresetStore(base / "presets.json"),
-                               power=lambda: self.ac, log=self.logs.append)
+                               power=lambda: self.ac, log=self.logs.append, music=self.music)
         self.store.save(True, [Rule("Battery Saver", power="battery"),
                                Rule("Night", start="22:00", end="07:00")])
 
     def tearDown(self):
         self._tmp.cleanup()
+
+    def test_music_lighting_takes_the_presets_colours(self):
+        from prism.music import set_enabled
+        from prism.presets import BUILTIN
+        set_enabled(True, self.music)
+        before = self.dev.zones()
+        self.ac = False
+        self.assertEqual(self.auto.step(__import__("datetime").datetime(2026, 1, 1, 12, 0)), "Battery Saver")
+        saver = next(p for p in BUILTIN if p.name == "Battery Saver")
+        self.assertEqual(self.music.load().colors, saver.zones)
+        self.assertEqual(self.dev.zones(), before)  # the music loop paints, not the preset
+        self.assertEqual(self.dev.brightness(), saver.brightness)
 
     def test_applies_once_and_respects_manual_changes(self):
         self.assertEqual(self.auto.step(at(23)), "Night")

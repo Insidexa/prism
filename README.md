@@ -33,6 +33,11 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   `~/.local/share/prism-sound/eq_presets.json`
   (`{"bands_hz": [...], "presets_db": {"Name": [dB per band]}}`) and chain profiles
   from `~/.local/share/prism-sound/chains/*.json` (see [Chain profiles](#chain-profiles)).
+- **Music lighting**: like OMEN Light Studio's audio mode, each zone pulses with part
+  of the sound that's playing: bass on the left, treble on the right, in the
+  colours of the current preset. It adjusts itself to the volume, settles back to
+  the plain colours when nothing plays, and keeps running with the app closed.
+  Needs numpy and a keyboard driver with the live `rgb_zones/frame` file.
 - **Automation**: switch presets by time of day and power source, e.g. a dim
   “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
   checked top to bottom, the first match wins, and colours you change by hand stay
@@ -111,6 +116,7 @@ prism effect breathing --speed 4
 prism preset list | apply Ice | save "My look" [--with-brightness] | delete "My look"
 prism profile performance      # silent | normal | performance
 prism maxfan on
+prism music on | off | status [--sensitivity 1.5]   # zones pulse with the sound
 prism auto status | on | off    # automatic presets (rules are edited in the app)
 prism sound list | status | toggle   # toggle: Prism chain <-> EasyEffects, to compare
 prism sound set --engine chain --chain my-tuning --eq Club --bass -3   # bass: dB, -12 = off

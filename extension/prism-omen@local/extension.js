@@ -78,6 +78,11 @@ class LightingToggle extends QuickMenuToggle {
         }
         this.menu.addMenuItem(this._effectMenu);
 
+        // Music lighting: zones pulse with the sound
+        this._music = new PopupMenu.PopupSwitchMenuItem('Music', false);
+        this._music.connect('toggled', (_i, on) => this._set(['music', on ? 'on' : 'off']));
+        this.menu.addMenuItem(this._music);
+
         // Presets, filled when the menu opens
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Presets'));
         this._presets = new PopupMenu.PopupMenuSection();
@@ -113,6 +118,11 @@ class LightingToggle extends QuickMenuToggle {
         this.menu.setHeader(this._gicon, 'Keyboard lighting',
             st.brightness > 0 ? `${effect} · ${st.brightness}%` : 'Off');
         this._effectMenu.label.text = `Effect: ${effect}`;
+        this._music.setToggleState(!!st.music);
+        if (st.music) {
+            this.subtitle = st.brightness > 0 ? 'Music' : 'Off';
+            this._effectMenu.label.text = 'Effect: Music';
+        }
         for (const [id, item] of this._effectItems)
             item.setOrnament(id === st.animation ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
         this._slider.block_signal_handler(this._sliderChangedId);

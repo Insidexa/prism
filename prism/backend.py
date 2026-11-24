@@ -156,6 +156,30 @@ class OmenDevice:
         for i, c in enumerate(colors):
             self.set_zone(i, c)
 
+    def base_zones(self) -> list[str]:
+        """The zone colours as set, without the brightness the driver applies to
+        what it reports (zones() returns the dimmed colours)."""
+        b = self.brightness()
+        if b <= 0:
+            return self.zones()
+        out = []
+        for c in self.zones():
+            r, g, bl = (min(255, round(int(c[i:i + 2], 16) * 100 / b)) for i in (1, 3, 5))
+            out.append(f"#{r:02x}{g:02x}{bl:02x}")
+        return out
+
+    def has_frame(self) -> bool:
+        return (self.root / "rgb_zones" / "frame").exists()
+
+    def set_frame(self, colors: list[str]) -> None:
+        """Live lighting: all zones at once, not saved (music lighting). Needs a
+        driver with rgb_zones/frame."""
+        if len(colors) != ZONE_COUNT:
+            raise ValueError(f"need {ZONE_COUNT} colours")
+        if not self.has_frame():
+            raise OmenError("this keyboard driver has no live lighting (rgb_zones/frame): update it")
+        self.write("rgb_zones/frame", " ".join(normalize_color(c)[1:] for c in colors))
+
     def set_all(self, color: str) -> None:
         self.write("rgb_zones/all", normalize_color(color)[1:])
 

@@ -45,7 +45,7 @@ class Preset:
 
     @classmethod
     def capture(cls, name: str, dev: OmenDevice, with_brightness: bool = False) -> "Preset":
-        return cls(name, dev.zones(), dev.brightness() if with_brightness else None,
+        return cls(name, dev.base_zones(), dev.brightness() if with_brightness else None,
                    dev.animation(), dev.speed())
 
 

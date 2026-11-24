@@ -53,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
+    s = sub.add_parser("music", help="keyboard lighting that follows the music playing")
+    s.add_argument("action", choices=("on", "off", "status"))
+    s.add_argument("--sensitivity", type=float, help="0.5 (calm) to 2 (lively), default 1")
+
     s = sub.add_parser("sound", help="speaker sound: Prism chain or EasyEffects, OMEN equalizer, bass")
     s.add_argument("action", choices=("status", "set", "list", "toggle"),
                    help="toggle: switch between the Prism chain and EasyEffects (to compare)")
@@ -89,11 +93,38 @@ def run(argv: list[str]) -> int:
             st = status(dev)
             if args.json:
                 st["sound"] = sound_status()
+                from .music import MusicStore
+                st["music"] = MusicStore().load().enabled and dev.has_frame()
                 print(json.dumps(st))
             else:
                 for k, v in st.items():
                     print(f"{k}: {' '.join(v) if isinstance(v, list) else v}")
+        elif args.cmd == "music":
+            from .music import MusicStore, available, set_enabled
+            store = MusicStore()
+            if args.action == "status":
+                m = store.load()
+                why = available()
+                print(f"music lighting: {'on' if m.enabled else 'off'}"
+                      + (f" (not available: {why})" if why else ""))
+                print(f"sensitivity: {m.sensitivity:g}")
+                if not dev.has_frame():
+                    print("driver: no live lighting (update the keyboard driver)")
+            else:
+                if args.action == "on":
+                    why = available()
+                    if why:
+                        raise ValueError(f"music lighting {why}")
+                    if not dev.has_frame():
+                        raise ValueError("the keyboard driver is too old for music lighting: "
+                                         "update it (sudo system/install.sh)")
+                set_enabled(args.action == "on", store)
+                if args.sensitivity is not None:
+                    m = store.load()
+                    m.sensitivity = min(2.0, max(0.5, args.sensitivity))
+                    store.save(m)
         elif args.cmd == "color":
+            stop_for_manual_change()
             if args.zone == "all":
                 dev.set_all(args.color)
             else:
@@ -101,6 +132,7 @@ def run(argv: list[str]) -> int:
         elif args.cmd == "brightness":
             dev.set_brightness(args.value)
         elif args.cmd == "effect":
+            stop_for_manual_change()
             if args.speed is not None:
                 dev.set_speed(args.speed)
             dev.set_animation(args.name)
@@ -111,6 +143,7 @@ def run(argv: list[str]) -> int:
             elif not args.name:
                 raise ValueError(f"preset {args.action} needs a name")
             elif args.action == "apply":
+                stop_for_manual_change()
                 store.get(args.name).apply(dev)
             elif args.action == "save":
                 from .presets import Preset
@@ -192,6 +225,11 @@ def run(argv: list[str]) -> int:
         print(f"prism: {e.args[0] if e.args else e}", file=sys.stderr)
         return 1
     return 0
+
+
+def stop_for_manual_change() -> None:
+    from .music import stop_for_manual_change as stop
+    stop()
 
 
 def sound_status() -> dict:
