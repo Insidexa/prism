@@ -53,16 +53,20 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
-    s = sub.add_parser("sound", help="speaker sound (EasyEffects): base tuning, OMEN equalizer, bass")
+    s = sub.add_parser("sound", help="speaker sound: Prism chain or EasyEffects, OMEN equalizer, bass")
     s.add_argument("action", choices=("status", "set", "list"))
-    s.add_argument("--base", help="an EasyEffects output preset, or 'off'")
+    s.add_argument("--engine", choices=("chain", "easyeffects"),
+                   help="chain: Prism's PipeWire chain; easyeffects: an EasyEffects preset")
+    s.add_argument("--chain", help="a Prism chain profile (engine chain)")
+    s.add_argument("--base", help="an EasyEffects output preset, or 'off' (engine easyeffects)")
     s.add_argument("--eq", help="an OMEN equalizer preset, or 'none'")
-    s.add_argument("--bass", type=float, help="bass amount (0 = off)")
+    s.add_argument("--bass", type=float,
+                   help="chain: Prism Bass in dB vs the profile (-12 = off); easyeffects: amount (0 = off)")
 
     s = sub.add_parser("auto", help="automatic presets by time and power source")
     s.add_argument("action", choices=("status", "on", "off"))
 
-    sub.add_parser("daemon", help="apply automatic presets (run by the prism-automation service)")
+    sub.add_parser("daemon", help="automatic presets and the speaker chain watcher (run by the prism-automation service)")
     sub.add_parser("gui", help="open the app (default)")
     return p
 
@@ -119,27 +123,43 @@ def run(argv: list[str]) -> int:
         elif args.cmd == "maxfan":
             dev.set_max_fan(args.state == "on")
         elif args.cmd == "sound":
+            from .chain import BASS_MIN, CHAIN, load_chains
             from .sound import (OFF, SoundEngine, base_presets, label, load_eq_presets,
                                 speaker_sink)
             eng = SoundEngine()
             cur = eng.current()
+            chains = load_chains()
             if args.action == "list":
-                print("bases: off, " + ", ".join(base_presets()))
+                print("chains: " + (", ".join(f"{n} ({c.label})" for n, c in chains.items()) or "none"))
+                print("easyeffects presets: off, " + ", ".join(base_presets()))
                 print("equalizers: none, " + ", ".join(load_eq_presets()))
             elif args.action == "status":
                 sink = speaker_sink()
                 print(f"speakers: {sink[1] if sink else 'not found'}")
-                print(f"sound: {'off' if cur.base == OFF else label(cur.base)}")
+                if cur.engine == CHAIN:
+                    c = chains.get(cur.chain) if cur.chain else next(iter(chains.values()), None)
+                    print(f"engine: Prism chain ({c.label if c else 'no profile installed'})")
+                    print(f"bass: {'off' if cur.chain_bass <= BASS_MIN else f'{cur.chain_bass:+g} dB'}")
+                else:
+                    print("engine: EasyEffects")
+                    print(f"sound: {'off' if cur.base == OFF else label(cur.base)}")
+                    print(f"bass: {'preset default' if cur.bass is None else cur.bass}")
                 print(f"equalizer: {cur.eq or 'none'}")
-                print(f"bass: {'preset default' if cur.bass is None else cur.bass}")
             else:
+                if args.engine is not None:
+                    cur.engine = args.engine
+                if args.chain is not None:
+                    cur.chain = args.chain
                 if args.base is not None:
                     cur.base = args.base
                 if args.eq is not None:
                     cur.eq = None if args.eq.lower() == "none" else args.eq
                 if args.bass is not None:
-                    cur.bass = args.bass
-                if cur.base != OFF and cur.base not in base_presets():
+                    if cur.engine == CHAIN:
+                        cur.chain_bass = args.bass
+                    else:
+                        cur.bass = args.bass
+                if cur.engine != CHAIN and cur.base != OFF and cur.base not in base_presets():
                     raise ValueError(f"no EasyEffects preset named {cur.base!r} (see: prism sound list)")
                 print(eng.apply(cur))
         elif args.cmd == "auto":

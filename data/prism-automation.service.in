@@ -1,5 +1,6 @@
 [Unit]
-Description=Prism automatic keyboard presets (time of day and power source)
+Description=Prism automatic keyboard presets and speaker sound watcher
+After=pipewire.service wireplumber.service
 
 [Service]
 ExecStart=@BINDIR@/prism daemon

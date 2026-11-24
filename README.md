@@ -18,12 +18,21 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   Power Mode, live CPU/GPU temperature, CPU load and fan speed, a drag-and-drop fan
   curve editor with a warning for unsafe curves, and CPU power limits (PL1/PL2).
   The discrete GPU is never woken just to read its temperature.
-- **Sound**: speaker tuning through EasyEffects, for the built-in speakers only
-  (headphones, HDMI and Bluetooth are left alone). Pick any installed speaker preset,
-  add one of the 13 OMEN Audio Control equalizer curves and set the virtual-bass
-  amount. Prism ships no proprietary tuning: it uses the presets installed in
-  EasyEffects, and reads equalizer curves from `~/.local/share/prism-sound/eq_presets.json`
-  (`{"bands_hz": [...], "presets_db": {"Name": [dB per band]}}`) if present.
+- **Sound**: speaker tuning for the built-in speakers only (headphones, HDMI and
+  Bluetooth are left alone), with two engines:
+  - **Prism chain** (recommended): a PipeWire filter-chain, so no extra app runs and
+    nothing can crash or stutter separately. Prism Bass (level-independent virtual
+    bass from added 2nd–4th harmonics), equalizer, crossfeed, a convolver with your
+    speaker tuning, and a look-ahead peak limiter. The volume is applied before the
+    processing, so quiet listening isn't squashed. Bass and equalizer change live,
+    and the chain comes back by itself after headphones, a restart or a crash.
+  - **EasyEffects**: any installed EasyEffects output preset.
+
+  Both can add one of the OMEN Audio Control equalizer curves and set the bass.
+  Prism ships no proprietary tuning. Equalizer curves are read from
+  `~/.local/share/prism-sound/eq_presets.json`
+  (`{"bands_hz": [...], "presets_db": {"Name": [dB per band]}}`) and chain profiles
+  from `~/.local/share/prism-sound/chains/*.json` (see [Chain profiles](#chain-profiles)).
 - **Automation**: switch presets by time of day and power source, e.g. a dim
   “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
   checked top to bottom, the first match wins, and colours you change by hand stay
@@ -103,16 +112,46 @@ prism profile performance      # silent | normal | performance
 prism maxfan on
 prism auto status | on | off    # automatic presets (rules are edited in the app)
 prism sound list | status
-prism sound set --base "Omen 16 Speakers" --eq Club --bass 3   # or --base off, --eq none
+prism sound set --engine chain --chain my-tuning --eq Club --bass -3   # bass: dB, -12 = off
+prism sound set --engine easyeffects --base "Omen 16 Speakers" --bass 3 # or --base off, --eq none
 ```
 
 Effects: static, breathing, rainbow, wave, pulse, chase, sparkle, candle, aurora,
 disco, gradient, spectrum.
 
 Presets live in `~/.config/prism/presets.json`, automation rules in
-`~/.config/prism/automation.json`. The rules are applied by the
+`~/.config/prism/automation.json`. The rules are applied, and the Prism chain is kept on the speakers, by the
 `prism-automation` user service, which `make install` enables
 (`systemctl --user status prism-automation`).
+
+## Chain profiles
+
+A chain profile describes a speaker tuning for the Prism chain. Put it in
+`~/.local/share/prism-sound/chains/<name>.json`; every key is optional:
+
+```json
+{
+  "label": "My tuning",
+  "impulse": "my-speakers.irs",
+  "impulse_gain_db": 0,
+  "crossfeed": 0.0,
+  "bass": {"h2_db": -20, "h3_db": -30, "h4_db": -28, "top_hz": 200, "bottom_hz": 12},
+  "ceiling_db": -1.0,
+  "release_ms": 50
+}
+```
+
+- `impulse`: a mono or stereo impulse response (WAV/IRS), relative to the profile.
+- `crossfeed`: the share of the opposite channel mixed in, 0–0.5.
+- `bass`: Prism Bass levels of the 2nd–4th harmonic relative to the bass, and the
+  bass band. The Sound page's bass slider moves all three together.
+- `ceiling_db`: the limiter's peak ceiling.
+
+Prism writes the chain to `~/.config/pipewire/filter-chain.conf.d/prism-chain.conf`
+and runs it with PipeWire's `filter-chain` user service. While the chain is in use,
+EasyEffects is stopped and its autostart is switched off; choosing EasyEffects again
+undoes both. The plug-ins (`dsp/prism_bass.c`) are built and installed into
+`~/.local/lib/ladspa` by `make install`.
 
 ## Development
 
@@ -129,7 +168,9 @@ prism/backend.py    all driver reads/writes and value validation
 prism/sensors.py    temperatures and load (k10temp, amdgpu, /proc/stat)
 prism/presets.py    built-in and saved presets
 prism/automation.py time/power rules and the background service
-prism/sound.py      speaker sound: composes and applies EasyEffects presets
+prism/sound.py      speaker sound settings; composes and applies EasyEffects presets
+prism/chain.py      the Prism chain: PipeWire filter-chain, switching, watcher
+dsp/                Prism Bass and Prism Limiter (LADSPA) and their design tools
 prism/cli.py        the `prism` command
 prism/app.py        GTK4/libadwaita app
 prism/widgets.py    keyboard preview, fan curve editor, sparklines

@@ -164,8 +164,13 @@ class Automation:
 
 
 def run_daemon(interval: float = 15.0) -> int:
-    auto = Automation(OmenDevice(), AutomationStore(), PresetStore(),
-                      log=lambda m: print(f"prism: {m}", flush=True))
+    import threading
+
+    from .chain import ChainWatcher
+    log = lambda m: print(f"prism: {m}", flush=True)  # noqa: E731
+    # Keeps the Prism chain on the speakers (after login, headphones, restarts).
+    threading.Thread(target=ChainWatcher(log=log).run, daemon=True, name="sound").start()
+    auto = Automation(OmenDevice(), AutomationStore(), PresetStore(), log=log)
     while True:
         auto.step(datetime.now())
         time.sleep(interval)

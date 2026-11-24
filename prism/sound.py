@@ -73,6 +73,9 @@ class SoundSettings:
     base: str = OFF            # an EasyEffects output preset name, or "off"
     eq: str | None = None      # an OMEN EQ preset name
     bass: float | None = None  # bass enhancer amount; None keeps the base preset's
+    engine: str = "easyeffects"  # "easyeffects", or "chain": the Prism chain (prism/chain.py)
+    chain: str | None = None     # chain profile name; None = the first installed
+    chain_bass: float = 0.0      # Prism Bass, dB relative to the chain profile
 
 
 class SoundStore:
@@ -284,10 +287,22 @@ class SoundEngine:
         return path
 
     def apply(self, s: SoundSettings) -> str:
-        """Build, autoload for the speakers and, if they are playing now, load it.
+        """Apply with the chosen engine; switching engines hands the sound over.
 
         Returns a short human description of what happened.
         """
+        from .chain import CHAIN, ChainEngine
+        prev = self.store.load().engine if self.store.path.exists() else "easyeffects"
+        if s.engine == CHAIN:
+            msg = ChainEngine().apply(s, switching=prev != CHAIN)
+            self.store.save(s)
+            return msg
+        if prev == CHAIN:
+            ChainEngine().leave()
+        return self.apply_easyeffects(s)
+
+    def apply_easyeffects(self, s: SoundSettings) -> str:
+        """Build, autoload for the speakers and, if they are playing now, load it."""
         if not easyeffects_available():
             raise ValueError("EasyEffects is not installed: sudo dnf install easyeffects")
         preset = self.build(s)

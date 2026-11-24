@@ -21,6 +21,7 @@ from .automation import (EXAMPLE_RULES, POWER_CHOICES, POWER_LABELS,  # noqa: E4
                          AutomationStore, Rule, on_ac_power, pick)
 from .presets import Preset, PresetStore  # noqa: E402
 from .sensors import Sensors  # noqa: E402
+from .chain import BASS_MAX, BASS_MIN, CHAIN, load_chains  # noqa: E402
 from .sound import (OFF, SoundEngine, base_presets, easyeffects_available,  # noqa: E402
                     easyeffects_running,
                     eq_bands_hz, label, load_eq_presets)
@@ -716,7 +717,10 @@ class AutomationPage(Gtk.Box):
 
 
 class SoundPage(Gtk.Box):
-    """Speaker sound through EasyEffects: base tuning, OMEN equalizer, bass."""
+    """Speaker sound: the Prism chain (PipeWire) or EasyEffects, OMEN equalizer, bass."""
+
+    ENGINES = [(CHAIN, "Prism chain", "Runs inside PipeWire: no extra app, nothing to crash"),
+               ("easyeffects", "EasyEffects", "An EasyEffects preset, applied by the EasyEffects app")]
 
     def __init__(self, win: "PrismWindow"):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -724,21 +728,32 @@ class SoundPage(Gtk.Box):
         self.engine = SoundEngine()
         self._loading = False
         self._bass_timer = 0
+        self.chains = load_chains()
+        self.engines = [e for e in self.ENGINES
+                        if (e[0] == CHAIN and self.chains) or (e[0] != CHAIN and easyeffects_available())]
         page = Adw.PreferencesPage()
         self.append(page)
 
-        if not easyeffects_available():
+        if not self.engines:
             page.add(Adw.PreferencesGroup())
-            self.append(Adw.StatusPage(icon_name="prism-speaker-symbolic", title="EasyEffects is not installed",
-                                       description="Prism uses it for the speaker sound.\n"
-                                                   "<tt>sudo dnf install easyeffects</tt>"))
+            self.append(Adw.StatusPage(
+                icon_name="prism-speaker-symbolic", title="No speaker tuning installed",
+                description="Install a Prism chain profile (see the README), or EasyEffects:\n"
+                            "<tt>sudo dnf install easyeffects</tt>"))
             page.set_visible(False)
             return
 
         main = Adw.PreferencesGroup(
             title="Built-in speakers",
-            description="Applied with EasyEffects to the laptop speakers only. "
+            description="Applied to the laptop speakers only. "
                         "Headphones, HDMI and Bluetooth are left untouched.")
+        self.engine_row = Adw.ComboRow(title="Engine",
+                                       model=Gtk.StringList.new([e[1] for e in self.engines]))
+        self.engine_row.connect("notify::selected", self._engine_changed)
+        main.add(self.engine_row)
+        if len(self.engines) < 2:
+            self.engine_row.set_visible(False)
+
         self.bases: list[str] = []
         self.base_row = Adw.ComboRow(title="Sound")
         self.base_row.connect("notify::selected", self._changed)
@@ -757,10 +772,10 @@ class SoundPage(Gtk.Box):
         self.bass.set_draw_value(True)
         self.bass.set_value_pos(Gtk.PositionType.LEFT)
         self.bass.connect("value-changed", self._bass_moved)
-        reset = Gtk.Button(icon_name="prism-undo-symbolic", tooltip_text="Use the preset's own bass",
+        reset = Gtk.Button(icon_name="prism-undo-symbolic", tooltip_text="Back to the tuning's own bass",
                            valign=Gtk.Align.CENTER, css_classes=["flat"])
         reset.connect("clicked", self._bass_reset)
-        self.bass_row = Adw.ActionRow(title="Bass", subtitle="Virtual bass: harmonics the small speakers can play")
+        self.bass_row = Adw.ActionRow(title="Bass")
         self.bass_row.add_suffix(self.bass)
         self.bass_row.add_suffix(reset)
         main.add(self.bass_row)
@@ -778,21 +793,53 @@ class SoundPage(Gtk.Box):
             self.eq_row.set_visible(False)
             self.eq_group.set_visible(False)
 
+    # ------------------------------------------------------------------ helpers
+    def _engine(self) -> str:
+        return self.engines[self.engine_row.get_selected()][0]
+
+    def _fill_for_engine(self, cur) -> None:
+        """Sound list, bass range and texts for the selected engine (no applying)."""
+        chain = self._engine() == CHAIN
+        self.engine_row.set_subtitle(self.engines[self.engine_row.get_selected()][2])
+        if chain:
+            self.bases = list(self.chains)
+            self.base_row.set_model(Gtk.StringList.new([self.chains[n].label for n in self.bases]))
+            name = cur.chain if cur.chain in self.chains else self.bases[0]
+            self.base_row.set_selected(self.bases.index(name))
+            self.bass.set_range(BASS_MIN, BASS_MAX)
+            self.bass.set_value(cur.chain_bass)
+            self.bass_row.set_subtitle("Prism Bass, dB from the tuning (far left = off)")
+        else:
+            self.bases = base_presets()
+            self.base_row.set_model(Gtk.StringList.new(["Off"] + [label(b) for b in self.bases]))
+            self.base_row.set_selected(0 if cur.base == OFF or cur.base not in self.bases
+                                       else self.bases.index(cur.base) + 1)
+            self.bass.set_range(0, 8)
+            self.bass.set_value(cur.bass if cur.bass is not None else self._preset_bass(cur.base))
+            self.bass_row.set_subtitle("Virtual bass: harmonics the small speakers can play")
+
     def refresh(self) -> None:
         if not hasattr(self, "base_row"):
             return
         self._loading = True
-        self.bases = base_presets()
-        self.base_row.set_model(Gtk.StringList.new(["Off"] + [label(b) for b in self.bases]))
         cur = self.engine.current()
-        self.base_row.set_selected(0 if cur.base == OFF or cur.base not in self.bases
-                                   else self.bases.index(cur.base) + 1)
+        names = [e[0] for e in self.engines]
+        self.engine_row.set_selected(names.index(cur.engine) if cur.engine in names else 0)
+        self._fill_for_engine(cur)
         self.eq_row.set_selected(self.eq_names.index(cur.eq) + 1 if cur.eq in self.eq_names else 0)
-        self.bass.set_value(cur.bass if cur.bass is not None else self._preset_bass(cur.base))
         self._sync_sensitivity()
         self._loading = False
-        self.win.worker.submit(easyeffects_running, then=lambda up: self.status_row.set_subtitle(
-            "EasyEffects is running" if up else "EasyEffects is not running: it starts on the next change"))
+        self._show_status(cur)
+
+    def _show_status(self, cur) -> None:
+        if cur.engine == CHAIN:
+            from .chain import NODE, node_id
+            self.win.worker.submit(lambda: node_id(NODE) is not None, then=lambda up: self.status_row.set_subtitle(
+                "Prism chain is playing on the speakers" if up
+                else "Prism chain is not running: it starts when the speakers are the output"))
+        else:
+            self.win.worker.submit(easyeffects_running, then=lambda up: self.status_row.set_subtitle(
+                "EasyEffects is running" if up else "EasyEffects is not running: it starts on the next change"))
 
     def _preset_bass(self, base: str) -> float:
         from .sound import base_bass
@@ -803,7 +850,7 @@ class SoundPage(Gtk.Box):
         return v if v is not None else 0.0
 
     def _sync_sensitivity(self):
-        on = self.base_row.get_selected() > 0
+        on = self._engine() == CHAIN or self.base_row.get_selected() > 0
         self.eq_row.set_sensitive(on)
         self.bass_row.set_sensitive(on)
         sel = self.eq_row.get_selected()
@@ -812,12 +859,18 @@ class SoundPage(Gtk.Box):
 
     def _settings(self, bass_from_slider: bool):
         cur = self.engine.current()
+        cur.engine = self._engine()
         i = self.base_row.get_selected()
-        cur.base = OFF if i == 0 else self.bases[i - 1]
+        if cur.engine == CHAIN:
+            cur.chain = self.bases[i] if 0 <= i < len(self.bases) else None
+            if bass_from_slider:
+                cur.chain_bass = float(self.bass.get_value())
+        else:
+            cur.base = OFF if i <= 0 else self.bases[i - 1]
+            if bass_from_slider:
+                cur.bass = float(self.bass.get_value())
         j = self.eq_row.get_selected()
         cur.eq = self.eq_names[j - 1] if j > 0 else None
-        if bass_from_slider:
-            cur.bass = float(self.bass.get_value())
         return cur
 
     def _apply(self, settings):
@@ -827,12 +880,23 @@ class SoundPage(Gtk.Box):
             self.status_row.set_subtitle(msg[:1].upper() + msg[1:])
         self.win.worker.submit(self.engine.apply, settings, then=done)
 
+    # ------------------------------------------------------------------ events
+    def _engine_changed(self, *_):
+        if self._loading:
+            return
+        cur = self.engine.current()
+        cur.engine = self._engine()
+        self._loading = True
+        self._fill_for_engine(cur)
+        self._loading = False
+        self._sync_sensitivity()
+        self._apply(self._settings(bass_from_slider=False))
+
     def _changed(self, *_):
         if self._loading:
             return
-        prev_base = self.engine.current().base
         s = self._settings(bass_from_slider=False)
-        if s.base != prev_base:
+        if s.engine != CHAIN and s.base != self.engine.current().base:
             s.bass = None  # new tuning: start from its own bass
             self._loading = True
             self.bass.set_value(self._preset_bass(s.base))
@@ -854,9 +918,13 @@ class SoundPage(Gtk.Box):
 
     def _bass_reset(self, _b):
         s = self._settings(bass_from_slider=False)
-        s.bass = None
         self._loading = True
-        self.bass.set_value(self._preset_bass(s.base))
+        if s.engine == CHAIN:
+            s.chain_bass = 0.0
+            self.bass.set_value(0.0)
+        else:
+            s.bass = None
+            self.bass.set_value(self._preset_bass(s.base))
         self._loading = False
         self._apply(s)
 
