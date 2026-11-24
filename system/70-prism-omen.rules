@@ -2,3 +2,7 @@
 # (the laptop's owner) when the driver binds. Read-only attributes stay so.
 ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="omen-rgb-keyboard", \
   RUN+="/usr/bin/sh -c 'cd /sys%p && find rgb_zones fan -maxdepth 1 -type f -perm -u=w -exec chown @USER@ {} +'"
+
+# The OMEN key: the Omen driver's own input device carries nothing but that key
+# (no typing), so @USER@ may read it; prism daemon opens Prism when it is pressed.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="HP Omen Keyboard", OWNER="@USER@", MODE="0600"

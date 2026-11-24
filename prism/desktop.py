@@ -10,8 +10,10 @@ import subprocess
 
 SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 BASE = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
-PATH = BASE + "prism-omen-key/"
-KEY = "XF86Launch1"
+# The OMEN key arrives either from the Omen driver's WMI input device as KEY_MSDOS
+# (XF86DOS), or, where the firmware sends it to the keyboard instead, as scancode
+# 0xab, which system/71-prism-omen-key.hwdb maps to prog1 (XF86Launch1). Bind both.
+BINDINGS = {BASE + "prism-omen-key/": "XF86DOS", BASE + "prism-omen-key-2/": "XF86Launch1"}
 
 
 def _gs(*args: str) -> str:
@@ -31,12 +33,14 @@ def bind_omen_key(command: str) -> bool:
     if not shutil.which("gsettings") or SCHEMA not in _gs("list-schemas"):
         return False
     paths = _paths()
-    if PATH not in paths:
-        _gs("set", SCHEMA, "custom-keybindings", str(paths + [PATH]))
-    rel = f"{SCHEMA}.custom-keybinding:{PATH}"
-    _gs("set", rel, "name", "Prism (OMEN key)")
-    _gs("set", rel, "command", command)
-    _gs("set", rel, "binding", KEY)
+    new = paths + [p for p in BINDINGS if p not in paths]
+    if new != paths:
+        _gs("set", SCHEMA, "custom-keybindings", str(new))
+    for path, key in BINDINGS.items():
+        rel = f"{SCHEMA}.custom-keybinding:{path}"
+        _gs("set", rel, "name", "Prism (OMEN key)")
+        _gs("set", rel, "command", command)
+        _gs("set", rel, "binding", key)
     return True
 
 
@@ -44,6 +48,7 @@ def unbind_omen_key() -> None:
     if not shutil.which("gsettings"):
         return
     paths = _paths()
-    if PATH in paths:
-        _gs("set", SCHEMA, "custom-keybindings", str([p for p in paths if p != PATH]))
-    _gs("reset-recursively", f"{SCHEMA}.custom-keybinding:{PATH}")
+    if any(p in paths for p in BINDINGS):
+        _gs("set", SCHEMA, "custom-keybindings", str([p for p in paths if p not in BINDINGS]))
+    for path in BINDINGS:
+        _gs("reset-recursively", f"{SCHEMA}.custom-keybinding:{path}")

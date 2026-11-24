@@ -186,6 +186,8 @@ def run_daemon(interval: float = 5.0) -> int:
     # Music lighting runs here too, so it keeps going with the app closed.
     threading.Thread(target=MusicWatcher(OmenDevice(), log=log, on_ac=on_ac_power).run,
                      daemon=True, name="music").start()
+    from .omenkey import OmenKeyListener
+    threading.Thread(target=OmenKeyListener(log=log).run, daemon=True, name="omen-key").start()
     from .power import PowerAuto
     power_auto = PowerAuto(log=log)
     from .battery import UsageRecorder
