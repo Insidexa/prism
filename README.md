@@ -43,6 +43,12 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   use per app on battery, like macOS's Battery settings. As on a Mac, use per app
   is an estimate from each app's CPU and GPU activity: no laptop measures power per
   app. `prism battery` prints the same.
+- **Power plans**: Battery saver, Balanced and Performance in one choice: GNOME's
+  Power Mode (which also moves the OMEN fan and power profile), the screen's
+  refresh rate (60 Hz on battery saver, the highest otherwise) and music lighting.
+  Prism applies the plan you choose for battery and for plugged in whenever the
+  power source changes (Automation page, or `prism plan --on-battery battery
+  --plugged-in balanced`).
 - **Automation**: switch presets by time of day and power source, e.g. a dim
   “Battery Saver” when unplugged and a warm “Night” from 22:00 to 07:00. Rules are
   checked top to bottom, the first match wins, and colours you change by hand stay
@@ -123,6 +129,7 @@ prism profile performance      # silent | normal | performance
 prism maxfan on
 prism music on | off | status [--sensitivity 1.5]   # zones pulse with the sound
 prism battery [--hours 24]     # status, discrete GPU, use per app
+prism plan battery | balanced | performance | status
 prism auto status | on | off    # automatic presets (rules are edited in the app)
 prism sound list | status | toggle   # toggle: Prism chain <-> EasyEffects, to compare
 prism sound set --engine chain --chain my-tuning --eq Club --bass -3   # bass: dB, -12 = off
@@ -190,6 +197,7 @@ Layout:
 prism/backend.py    all driver reads/writes and value validation
 prism/sensors.py    temperatures and load (k10temp, amdgpu, /proc/stat)
 prism/battery.py    battery status, history, estimated use per app
+prism/power.py      power plans (power mode, refresh rate) and switching them by power source
 prism/music.py      music lighting
 prism/presets.py    built-in and saved presets
 prism/automation.py time/power rules and the background service

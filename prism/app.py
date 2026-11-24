@@ -605,7 +605,31 @@ class AutomationPage(Gtk.Box):
         page.add(self.rules_group)
         self._rows: list[Gtk.Widget] = []
 
+        from .power import KEEP, PLANS, PlanStore
+        self.plans = PlanStore()
+        self.plan_keys = [KEEP] + list(PLANS)
+        labels = ["Keep as it is"] + [p.label for p in PLANS.values()]
+        plan_group = Adw.PreferencesGroup(
+            title="Power plans",
+            description="Applied when you plug in or unplug. Battery saver: GNOME's power saver mode "
+                        "(quiet fans, lower CPU and GPU power), the screen at 60 Hz and music lighting off. "
+                        "The discrete GPU sleeps by itself when nothing uses it: see the Battery page.")
+        self.plan_rows = {}
+        for key, title in (("battery", "On battery"), ("ac", "Plugged in")):
+            row = Adw.ComboRow(title=title, model=Gtk.StringList.new(labels))
+            row.connect("notify::selected", self._plan_changed, key)
+            plan_group.add(row)
+            self.plan_rows[key] = row
+        page.add(plan_group)
+
         GLib.timeout_add_seconds(15, self._tick)
+
+    def _plan_changed(self, row, _p, key):
+        if self._loading:
+            return
+        d = self.plans.load()
+        d[key] = self.plan_keys[row.get_selected()]
+        self.plans.save(d)
 
     def refresh(self) -> None:
         try:
@@ -614,6 +638,9 @@ class AutomationPage(Gtk.Box):
             self.win.toast(f"automation.json is invalid: {e}")
             return
         self._loading = True
+        plans = self.plans.load()
+        for key, row in self.plan_rows.items():
+            row.set_selected(self.plan_keys.index(plans[key]))
         self.enable_row.set_active(self.enabled)
         self._loading = False
         for row in self._rows:

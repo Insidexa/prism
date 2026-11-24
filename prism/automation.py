@@ -175,7 +175,7 @@ class Automation:
         return hit[1].preset
 
 
-def run_daemon(interval: float = 15.0) -> int:
+def run_daemon(interval: float = 5.0) -> int:
     import threading
 
     from .chain import ChainWatcher
@@ -186,10 +186,16 @@ def run_daemon(interval: float = 15.0) -> int:
     # Music lighting runs here too, so it keeps going with the app closed.
     threading.Thread(target=MusicWatcher(OmenDevice(), log=log, on_ac=on_ac_power).run,
                      daemon=True, name="music").start()
+    from .power import PowerAuto
+    power_auto = PowerAuto(log=log)
     from .battery import UsageRecorder
     # Estimated battery use per app (prism battery, Battery page).
     threading.Thread(target=UsageRecorder(log=log).run, daemon=True, name="battery").start()
     auto = Automation(OmenDevice(), AutomationStore(), PresetStore(), log=log)
     while True:
+        try:
+            power_auto.step()
+        except Exception as e:  # a missing GNOME session must not stop the lighting rules
+            log(f"power plans: {e}")
         auto.step(datetime.now())
         time.sleep(interval)

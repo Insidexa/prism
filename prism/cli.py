@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("maxfan", help="run both fans at full speed")
     s.add_argument("state", choices=("on", "off"))
 
+    s = sub.add_parser("plan", help="power plan now, or which plan to use on battery / plugged in")
+    s.add_argument("name", nargs="?", choices=("battery", "balanced", "performance", "status"),
+                   default="status")
+    s.add_argument("--on-battery", choices=("battery", "balanced", "performance", "keep"))
+    s.add_argument("--plugged-in", choices=("battery", "balanced", "performance", "keep"))
+
     s = sub.add_parser("battery", help="battery status, history and estimated use per app")
     s.add_argument("--hours", type=float, default=24, help="period for use per app (default 24)")
 
@@ -91,6 +97,24 @@ def run(argv: list[str]) -> int:
 
     if args.cmd == "battery":
         return battery_report(args.hours)
+    if args.cmd == "plan":
+        from .power import PLANS, PlanStore, apply_plan, builtin_rates, power_mode
+        st = PlanStore()
+        auto = st.load()
+        if args.on_battery or args.plugged_in:
+            auto["battery"] = args.on_battery or auto["battery"]
+            auto["ac"] = args.plugged_in or auto["ac"]
+            st.save(auto)
+        if args.name == "status":
+            rates = builtin_rates()
+            print(f"power mode: {power_mode() or 'unknown'}")
+            if rates:
+                print(f"screen: {rates[0]:g} Hz (of {', '.join(f'{r:g}' for r in rates[1])})")
+            lab = lambda k: "keep as is" if auto[k] == "keep" else PLANS[auto[k]].label  # noqa: E731
+            print(f"on battery: {lab('battery')}; plugged in: {lab('ac')}")
+        else:
+            print(f"{PLANS[args.name].label}: " + (", ".join(apply_plan(args.name)) or "no change"))
+        return 0
 
     dev = OmenDevice()
     store = PresetStore()
