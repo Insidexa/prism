@@ -100,8 +100,13 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         return json.loads(files[0].read_text())
 
-    def test_lists_known_tunings_first(self):
+    def test_lists_known_tunings_first_and_hides_eq_aliases(self):
+        (self.ee / "output" / "OMEN16 BO Music + Club.json").write_text(json.dumps(BO))
         self.assertEqual(base_presets(self.ee), ["OMEN16 BO Music", "beoplaxex"])
+        f = self.ee / "autoload" / "output" / "x.json"
+        f.write_text(json.dumps({"device": SPEAKER[0], "preset-name": "OMEN16 BO Music + Club"}))
+        cur = self.engine.current()
+        self.assertEqual((cur.base, cur.eq), ("OMEN16 BO Music", "Club"))
         self.assertEqual(sound.load_eq_presets().keys(), {"Club", "Flat"})  # malformed one skipped
 
     def test_apply_on_speakers_loads_and_autoloads(self):

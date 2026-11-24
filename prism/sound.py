@@ -25,10 +25,12 @@ OFF = "off"
 EQ_Q = 1.41  # OMEN Audio Control's 10-band graphic EQ, one octave per band
 
 FRIENDLY = {
-    "OMEN16 BO Music": "B&O · Windows tuning",
-    "OMEN16 BO Music + Club": "B&O · Windows tuning + Club",
+    "OMEN16 BO Music": "B&O (Windows)",
     "Omen 16 Speakers": "Prism tuning",
 }
+# Presets that are just another preset plus an OMEN equalizer curve. They are
+# not offered separately: the Equalizer choice gives the same result.
+ALIASES = {"OMEN16 BO Music + Club": ("OMEN16 BO Music", "Club")}
 
 
 def ee_dir() -> Path:
@@ -93,7 +95,8 @@ class SoundStore:
 def base_presets(root: Path | None = None) -> list[str]:
     out_dir = (root or ee_dir()) / "output"
     names = sorted(p.stem for p in out_dir.glob("*.json")) if out_dir.exists() else []
-    names = [n for n in names if n not in (PRISM_PRESET, OFF_PRESET)]
+    names = [n for n in names if n not in (PRISM_PRESET, OFF_PRESET)
+             and not (n in ALIASES and ALIASES[n][0] in names)]
     # Known speaker tunings first, in a sensible order.
     known = [n for n in FRIENDLY if n in names]
     return known + [n for n in names if n not in known]
@@ -229,13 +232,13 @@ class SoundEngine:
     def current(self) -> SoundSettings:
         """Saved settings, or (first run) whatever EasyEffects autoloads for the speakers."""
         if self.store.path.exists():
-            return self.store.load()
+            return _unalias(self.store.load())
         sink = speaker_sink()
         if sink:
             for f in (self.root / "autoload" / "output").glob("*.json"):
                 d = _json(f)
                 if d.get("device") == sink[0] and d.get("preset-name") not in (None, PRISM_PRESET, OFF_PRESET):
-                    return SoundSettings(base=d["preset-name"])
+                    return _unalias(SoundSettings(base=d["preset-name"]))
         return SoundSettings()
 
     def read_preset(self, name: str) -> dict:
@@ -291,6 +294,13 @@ class SoundEngine:
             _run(["easyeffects", "-l", preset])
             return "applied to the speakers"
         return "saved; it applies when the speakers are the output again"
+
+
+def _unalias(s: SoundSettings) -> SoundSettings:
+    if s.base in ALIASES:
+        s.base, eq = ALIASES[s.base]
+        s.eq = s.eq or eq
+    return s
 
 
 def _json(path: Path) -> dict:
