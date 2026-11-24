@@ -221,7 +221,8 @@ def start_easyeffects() -> bool:
     """Start the EasyEffects background service detached from us; wait until it is up."""
     import time
     _run(["systemd-run", "--user", "--collect", "--quiet", "--unit",
-          f"easyeffects-service-{int(time.time())}", "easyeffects", "--service-mode"])
+          f"easyeffects-service-{int(time.time())}", "easyeffects", "--service-mode", "-w"])
+    # -w: EasyEffects 8 shows its window on start even in service mode.
     for _ in range(25):
         if easyeffects_running():
             time.sleep(1.0)  # let it finish loading presets
