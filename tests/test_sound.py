@@ -112,7 +112,7 @@ class EngineTests(unittest.TestCase):
     def test_apply_on_speakers_loads_and_autoloads(self):
         msg = self.engine.apply(SoundSettings("OMEN16 BO Music", "Club", 4))
         self.assertEqual(msg, "applied to the speakers")
-        self.assertEqual(self.loaded[-1], ["easyeffects", "-l", PRISM_PRESET])
+        self.assertEqual(self.loaded[-1], ["easyeffects", "-w", "-l", PRISM_PRESET])  # -w: no window
         a = self.autoload()
         self.assertEqual((a["device"], a["device-profile"], a["preset-name"]),
                          (SPEAKER[0], "[Out] Speaker", PRISM_PRESET))

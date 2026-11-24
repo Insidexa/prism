@@ -21,6 +21,7 @@ from .presets import config_dir
 
 PRISM_PRESET = "Prism Speakers"
 OFF_PRESET = "Prism Off"
+HANDOVER_PRESET = "Prism Handover"  # brief: makes EasyEffects release apps (prism/chain.py)
 OFF = "off"
 EQ_Q = 1.41  # OMEN Audio Control's 10-band graphic EQ, one octave per band
 
@@ -99,7 +100,7 @@ class SoundStore:
 def base_presets(root: Path | None = None) -> list[str]:
     out_dir = (root or ee_dir()) / "output"
     names = sorted(p.stem for p in out_dir.glob("*.json")) if out_dir.exists() else []
-    names = [n for n in names if n not in (PRISM_PRESET, OFF_PRESET)
+    names = [n for n in names if n not in (PRISM_PRESET, OFF_PRESET, HANDOVER_PRESET)
              and not (n in ALIASES and ALIASES[n][0] in names)]
     # Known speaker tunings first, in a sensible order.
     known = [n for n in FRIENDLY if n in names]
@@ -318,7 +319,10 @@ class SoundEngine:
         if not easyeffects_running() and not start_easyeffects():
             raise ValueError("EasyEffects is not running and could not be started")
         if default_sink() == sink[0]:
-            _run(["easyeffects", "-l", preset])
+            # Always load it, also right after a start: EasyEffects starts with its last
+            # preset (maybe Prism's handover one, which blocklists apps), not the autoload.
+            # -w: commands to a running EasyEffects otherwise bring up its window.
+            _run(["easyeffects", "-w", "-l", preset])
             return "applied to the speakers"
         return "saved; it applies when the speakers are the output again"
 

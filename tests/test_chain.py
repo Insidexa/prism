@@ -174,6 +174,50 @@ class EngineTest(unittest.TestCase):
         self.assertTrue(chain.conf_path().exists())
         self.assertIn(["wpctl", "set-default", "2"], self.calls)
 
+    def test_easyeffects_stops_only_after_the_chain_is_the_output(self):
+        seen = []
+
+        def stop():
+            seen.append((["wpctl", "set-default", "2"] in self.calls, self.volumes[1]))
+        with mock.patch.object(chain, "stop_easyeffects", stop):
+            self.engine.apply(SoundSettings(engine=CHAIN), switching=True)
+        # Chain already the default (players never lose their output), speakers not yet raised.
+        self.assertEqual(seen, [(True, 0.5)])  # at the listening volume, not 100 %
+        self.assertEqual(self.volumes[1], 1.0)
+
+    def test_release_blocklists_the_apps_playing_through_easyeffects(self):
+        sinks = json.dumps([{"index": 7, "name": "easyeffects_sink"}, {"index": 1, "name": SPEAKER[0]}])
+        playing = [{"sink": 7, "properties": {"application.name": "Firefox",
+                                              "application.process.binary": "firefox"}},
+                   {"sink": 1, "properties": {"application.name": "Other"}}]
+        ee = Path(self._tmp.name) / "ee"
+        state = {"released": False}
+
+        def run(cmd, timeout=10):
+            self.calls.append(cmd)
+            if cmd[-2:] == ["list", "sinks"]:
+                return sinks
+            if cmd[-2:] == ["list", "sink-inputs"]:
+                return "[]" if state["released"] else json.dumps(playing)
+            if cmd[:3] == ["easyeffects", "-w", "-l"]:
+                state["released"] = True
+            return ""
+        with mock.patch.object(chain, "_run", run), mock.patch.object(chain, "easyeffects_running", lambda: True), \
+                mock.patch.object(chain, "ee_dir", lambda: ee):
+            chain.release_easyeffects_streams()
+        preset = json.loads((ee / "output" / f"{sound.HANDOVER_PRESET}.json").read_text())
+        self.assertEqual(preset["output"]["blocklist"], ["Firefox", "firefox"])
+        self.assertIn(["easyeffects", "-w", "-l", sound.HANDOVER_PRESET], self.calls)
+
+    def test_clean_easyeffects_config_undoes_only_the_handover(self):
+        f = chain.ee_config()
+        f.parent.mkdir(parents=True)
+        f.write_text("[Presets]\nlastLoadedOutputPreset=Prism Handover\n[StreamOutputs]\n"
+                     "blocklist=Mine,Firefox,firefox\nusedPresets=Prism Speakers:3,Prism Handover:1\n")
+        chain.clean_easyeffects_config(["Firefox", "firefox"])
+        self.assertEqual(f.read_text(), "[Presets]\nlastLoadedOutputPreset=Prism Speakers\n"
+                         "[StreamOutputs]\nblocklist=Mine\nusedPresets=Prism Speakers:3\n")
+
     def test_bass_and_eq_change_live_without_restart(self):
         self.engine.apply(SoundSettings(engine=CHAIN), switching=True)
         self.calls.clear()

@@ -34,8 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .presets import config_dir
-from .sound import (EQ_Q, _run, easyeffects_running, eq_bands_hz, load_eq_presets,
-                    sound_data_dir, speaker_sink)
+from .sound import (EQ_Q, HANDOVER_PRESET, _run, easyeffects_running, ee_dir, eq_bands_hz,
+                    load_eq_presets, sound_data_dir, speaker_sink)
 
 CHAIN = "chain"
 NODE = "prism_speakers"
@@ -268,13 +268,84 @@ def stop_easyeffects() -> None:
     if not easyeffects_running():
         return
     # Only a running EasyEffects may be asked: with none, "easyeffects -q" starts one and waits.
-    if not _run(["timeout", "10", "easyeffects", "-q"], timeout=12) and easyeffects_running():
+    # -w: without it the command brings up EasyEffects' window on its way out
+    if not _run(["timeout", "10", "easyeffects", "-w", "-q"], timeout=12) and easyeffects_running():
         _run(["pkill", "-u", str(os.getuid()), "-x", "easyeffects"])
     for _ in range(30):
         if not easyeffects_running():
             return
         time.sleep(0.2)
     _run(["pkill", "-9", "-u", str(os.getuid()), "-x", "easyeffects"])
+
+
+def stream_apps(on_sink: str) -> list[str]:
+    """Names EasyEffects' blocklist can match, for the streams playing into a sink."""
+    try:
+        sinks = {str(x["index"]): x["name"] for x in json.loads(_run(["pactl", "-f", "json", "list", "sinks"]) or "[]")}
+        inputs = json.loads(_run(["pactl", "-f", "json", "list", "sink-inputs"]) or "[]")
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
+    names: list[str] = []
+    for i in inputs:
+        if sinks.get(str(i.get("sink"))) != on_sink:
+            continue
+        props = i.get("properties", {})
+        for k in ("application.name", "application.id", "application.process.binary"):
+            if props.get(k) and props[k] not in names:
+                names.append(props[k])
+    return names
+
+
+def release_easyeffects_streams() -> list[str]:
+    """Make a running EasyEffects let go of the playing apps, so they move to the
+    default output while their old one still exists (players pause otherwise).
+
+    Done with a preset that blocklists them: EasyEffects then hands them back.
+    """
+    if not easyeffects_running():
+        return []
+    apps = stream_apps("easyeffects_sink")
+    if not apps:
+        return []
+    out = ee_dir() / "output"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{HANDOVER_PRESET}.json").write_text(
+        json.dumps({"output": {"blocklist": apps, "plugins_order": []}}, indent=4))
+    _run(["easyeffects", "-w", "-l", HANDOVER_PRESET])
+    for _ in range(25):
+        if not stream_apps("easyeffects_sink"):
+            break
+        time.sleep(0.1)
+    return apps
+
+
+def ee_config() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "easyeffects/db/easyeffectsrc"
+
+
+def clean_easyeffects_config(released: list[str]) -> None:
+    """After EasyEffects has quit: undo the handover in its saved settings, so it
+    starts with the speaker preset and the apps not blocklisted."""
+    from .sound import PRISM_PRESET
+    f = ee_config()
+    try:
+        lines = f.read_text().splitlines()
+    except OSError:
+        return
+    out = []
+    for line in lines:
+        key, _, val = line.partition("=")
+        if key == "blocklist":
+            left = [a for a in val.split(",") if a and a not in released]
+            if not left:
+                continue
+            line = "blocklist=" + ",".join(left)
+        elif key == "lastLoadedOutputPreset" and val == HANDOVER_PRESET:
+            line = f"lastLoadedOutputPreset={PRISM_PRESET}"
+        elif key in ("mostUsedPresets", "usedPresets"):
+            line = key + "=" + ",".join(x for x in val.split(",") if x.split(":")[0] != HANDOVER_PRESET)
+        out.append(line)
+    f.write_text("\n".join(out) + "\n")
 
 
 AUTOSTART_MARK = "# Prism: EasyEffects stays off while the Prism chain is the speaker sound"
@@ -365,7 +436,8 @@ class ChainEngine:
         new_shape = st.extra.get("shape") != shape
         st.extra["shape"] = shape
         if switching:
-            stop_easyeffects()
+            # EasyEffects is stopped only once the streams are on the chain (take_over):
+            # a player whose output vanishes under it pauses, as if headphones were pulled.
             hide_easyeffects_autostart()
             if systemctl("is-enabled", "filter-chain").strip() != "enabled":
                 systemctl("enable", "filter-chain")
@@ -389,27 +461,36 @@ class ChainEngine:
                 if v is not None:
                     st.volume = v
                     self.save_state(st)
-            self.restart(st.volume)
+            self.restart(st.volume, stop_ee=switching)
         else:
             set_controls(nid, ctl)
             if switching:
-                self.take_over(st.volume)
+                self.take_over(st.volume, stop_ee=True)
         return f"{p.label} on the speakers"
 
-    def take_over(self, volume: float) -> None:
-        """Chain at the listening volume, speakers at 100 %, chain the default output."""
+    def take_over(self, volume: float, stop_ee: bool = False) -> None:
+        """Chain at the listening volume and the default output, streams moved onto it,
+        then (only then) EasyEffects stopped and the speakers raised to 100 %."""
         nid, spk = node_id(NODE), speaker_sink()
         if nid is None or spk is None:
             return
         set_volume(nid, volume)
+        _run(["wpctl", "set-default", str(nid)])
+        move_streams({spk[0], "easyeffects_sink"}, NODE)
+        if stop_ee:
+            released = release_easyeffects_streams()
+            move_streams({spk[0], "easyeffects_sink"}, NODE)
+            stop_easyeffects()
+            (ee_dir() / "output" / f"{HANDOVER_PRESET}.json").unlink(missing_ok=True)
+            if released and not easyeffects_running():
+                clean_easyeffects_config(released)
+            move_streams({spk[0], "easyeffects_sink"}, NODE)
         sid = node_id(spk[0])
         if sid is not None:
             set_volume(sid, 1.0)
             _run(["wpctl", "set-mute", str(sid), "0"])
-        _run(["wpctl", "set-default", str(nid)])
-        move_streams({spk[0], "easyeffects_sink"}, NODE)
 
-    def restart(self, volume: float) -> None:
+    def restart(self, volume: float, stop_ee: bool = False) -> None:
         """Recreate the chain. While it is gone, streams fall back to the bare speakers,
         so first bring those down to the listening volume: no loud burst."""
         spk = speaker_sink()
@@ -423,7 +504,7 @@ class ChainEngine:
             time.sleep(0.2)
         else:
             raise ValueError("the Prism chain did not start: journalctl --user -u filter-chain")
-        self.take_over(volume)
+        self.take_over(volume, stop_ee=stop_ee)
 
     def leave(self) -> float:
         """Back to the bare speakers (for EasyEffects): returns the listening volume."""
