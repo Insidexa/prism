@@ -7,8 +7,10 @@
 # Without a path, the driver version Prism was tested with is downloaded.
 set -euo pipefail
 
-DRIVER_REPO=https://github.com/OmenLinux/omen-rgb-keyboard.git
-DRIVER_COMMIT=6f24c86dcd514a5ca4aec54273bc30e1bae14493
+# OmenLinux's driver plus Prism's fixes (Linux 7.x state saving, the live "frame"
+# lighting file for music lighting, single-zone brightness), until they are upstream.
+DRIVER_REPO=https://github.com/Insidexa/omen-rgb-keyboard.git
+DRIVER_COMMIT=75739ec5583045c57d5f3732b542820a464b0b69
 SRC="${1:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 STATE_DIR=/var/lib/omen-rgb-keyboard
