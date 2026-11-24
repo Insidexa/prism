@@ -112,6 +112,69 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(args["node.description"], "Speakers (Prism T)")
 
 
+class VolumeBassTest(unittest.TestCase):
+    VEQ = {"from_db": -10.5, "to_db": 0.0, "gain_db": -1.0, "bass_db": -10.8,
+           "filters": [{"freq": 89.0, "q": 0.55, "gain": -7.8}, {"freq": 266.0, "q": 0.92, "gain": 3.9}]}
+
+    def profile(self):
+        return ChainProfile("t", "T", crossfeed=0.2, eq=[{"freq": 83.0, "q": 0.68, "gain": 2.2}],
+                            bass={"h2_db": -20, "h3_db": -30, "h4_db": -28, "top_hz": 280, "bottom_hz": 12},
+                            volume_eq=self.VEQ)
+
+    def test_amount_ramps_in_db_between_from_and_to(self):
+        p = self.profile()
+        self.assertEqual(chain.volume_amount(p, 0.3), 0.0)                  # quiet: Windows-like, no cut
+        self.assertAlmostEqual(chain.volume_amount(p, 10 ** (-10.5 / 60)), 0.0)  # 50 % on Windows
+        self.assertAlmostEqual(chain.volume_amount(p, 10 ** (-5.25 / 60)), 0.5)
+        self.assertEqual(chain.volume_amount(p, 1.0), 1.0)
+        self.assertEqual(chain.volume_amount(p, 1.5), 1.0)                  # over-amplified: capped
+        self.assertEqual(chain.volume_amount(ChainProfile("n", "N"), 1.0), 0.0)
+
+    def test_full_volume_controls(self):
+        c = controls(self.profile(), None, BANDS, 1.0, volume=1.0)
+        self.assertEqual(c["bass:Amount (dB)"], 1.0 - 10.8)
+        self.assertEqual((c["veqL0:Gain"], c["veqR1:Gain"]), (-7.8, 3.9))
+        self.assertAlmostEqual(c["mixL:Gain 1"], 0.8 * 10 ** (-1 / 20), places=5)
+        quiet = controls(self.profile(), None, BANDS, 0.0, volume=0.2)
+        self.assertEqual((quiet["bass:Amount (dB)"], quiet["veqL0:Gain"]), (0.0, 0.0))
+        self.assertEqual(controls(self.profile(), None, BANDS, BASS_MIN, volume=1.0)["bass:Amount (dB)"], -120.0)
+
+    def test_graph_places_fixed_then_volume_filters_before_crossfeed(self):
+        g = graph(self.profile(), None, BANDS, 0.0, Path("/x.so"))
+        lk = {(l["output"], l["input"]) for l in g["links"]}
+        for a, b in [("eqL9:Out", "teqL0:In"), ("teqL0:Out", "veqL0:In"), ("veqL0:Out", "veqL1:In"),
+                     ("veqL1:Out", "mixL:In 1"), ("veqR1:Out", "mixL:In 2")]:
+            self.assertIn((a, b), lk)
+        teq = next(n for n in g["nodes"] if n["name"] == "teqR0")
+        self.assertEqual(teq["control"], {"Freq": 83.0, "Q": 0.68, "Gain": 2.2})
+
+    def test_profile_file_with_eq_and_volume_eq(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "a.json").write_text(json.dumps({"eq": [{"freq": 83, "gain": 2}], "volume_eq": {
+                "from_db": -10, "bass_db": -6, "filters": [{"freq": 90, "q": 0.5, "gain": -8}]}}))
+            (Path(d) / "bad.json").write_text(json.dumps({"volume_eq": {"from_db": 0, "to_db": -5}}))
+            got = load_chains(Path(d))
+        self.assertEqual(list(got), ["a"])
+        self.assertEqual(got["a"].eq, [{"freq": 83.0, "q": 0.7, "gain": 2.0}])
+        self.assertEqual(got["a"].volume_eq["to_db"], 0.0)
+
+    def test_watcher_ramps_to_a_new_volume(self):
+        sent = []
+        eng = mock.Mock()
+        eng.profile.return_value = self.profile()
+        eng.live_controls.side_effect = lambda s, v, amount=None: {"a": amount}
+        w = ChainWatcher(eng, log=lambda m: None)
+        with mock.patch.object(chain, "set_controls", lambda nid, c: sent.append(c["a"])), \
+                mock.patch.object(chain.time, "sleep", lambda t: None):
+            w.follow_volume(5, SoundSettings(engine=CHAIN), 0.2)   # first look: straight there
+            w.follow_volume(5, SoundSettings(engine=CHAIN), 1.0)   # 0 -> 1 in steps
+            w.follow_volume(5, SoundSettings(engine=CHAIN), 1.0)   # no change: nothing sent
+        self.assertEqual(sent[0], 0.0)
+        self.assertEqual(len(sent), 1 + 8)
+        self.assertEqual(sent[-1], 1.0)
+        self.assertTrue(all(a < b for a, b in zip(sent[1:], sent[2:])))
+
+
 class EngineTest(unittest.TestCase):
     """Switching and live updates, with PipeWire mocked out."""
 
@@ -261,7 +324,7 @@ class EngineTest(unittest.TestCase):
 
     def test_watcher_brings_speakers_down_then_restores_chain(self):
         self.engine.apply(SoundSettings(engine=CHAIN), switching=True)
-        os.utime(self.engine.state_path, (0, 0))  # not busy
+        os.utime(chain.conf_path(), (0, 0))  # not busy
         w = ChainWatcher(self.engine, log=lambda m: None, settings=lambda: SoundSettings(engine=CHAIN))
         del self.nodes[NODE]
         self.volumes[1] = 1.0
@@ -280,7 +343,7 @@ class EngineTest(unittest.TestCase):
         w = ChainWatcher(self.engine, log=lambda m: None, settings=lambda: SoundSettings())
         self.assertIsNone(w.step())
         self.engine.apply(SoundSettings(engine=CHAIN), switching=True)
-        os.utime(self.engine.state_path, (0, 0))
+        os.utime(chain.conf_path(), (0, 0))
         w = ChainWatcher(self.engine, log=lambda m: None, settings=lambda: SoundSettings(engine=CHAIN))
         del self.nodes[NODE]
         with mock.patch.object(chain, "speaker_sink", lambda: None):

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import struct
 import subprocess
@@ -74,6 +75,8 @@ class ChainProfile:
     ceiling_db: float = -1.0
     release_ms: float = 50.0
     description: str = ""
+    eq: list[dict] = field(default_factory=list)  # fixed peaking filters {freq, q, gain}
+    volume_eq: dict | None = None                    # volume-aware bass, see volume_amount()
 
 
 def load_chains(root: Path | None = None) -> dict[str, ChainProfile]:
@@ -92,15 +95,27 @@ def load_chains(root: Path | None = None) -> dict[str, ChainProfile]:
             if bass is not None:
                 bass = {k: float(bass[k]) for k in ("h2_db", "h3_db", "h4_db")} | {
                     "top_hz": float(bass.get("top_hz", 200)), "bottom_hz": float(bass.get("bottom_hz", 12))}
+            eq = [_filt(x) for x in d.get("eq", [])]
+            veq = d.get("volume_eq")
+            if veq is not None:
+                veq = {"from_db": float(veq.get("from_db", -10.0)), "to_db": float(veq.get("to_db", 0.0)),
+                       "gain_db": float(veq.get("gain_db", 0.0)), "bass_db": float(veq.get("bass_db", 0.0)),
+                       "filters": [_filt(x) for x in veq.get("filters", [])]}
+                if veq["to_db"] <= veq["from_db"]:
+                    raise ValueError("volume_eq: to_db must be above from_db")
             out[f.stem] = ChainProfile(
                 name=f.stem, label=str(d.get("label", f.stem)), impulse=path,
                 impulse_gain_db=float(d.get("impulse_gain_db", 0.0)),
                 crossfeed=min(0.5, max(0.0, float(d.get("crossfeed", 0.0)))), bass=bass,
                 ceiling_db=float(d.get("ceiling_db", -1.0)), release_ms=float(d.get("release_ms", 50.0)),
-                description=str(d.get("description", "")))
+                description=str(d.get("description", "")), eq=eq, volume_eq=veq)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
     return out
+
+
+def _filt(x: dict) -> dict:
+    return {"freq": float(x["freq"]), "q": float(x.get("q", 0.7)), "gain": float(x["gain"])}
 
 
 def wav_channels(path: Path) -> int:
@@ -127,17 +142,32 @@ def headroom_db(eq_gains: list[float] | None) -> float:
     return min(6.0, max([0.0] + list(eq_gains)) * 0.5) if eq_gains else 0.0
 
 
+def volume_amount(p: ChainProfile, volume: float | None) -> float:
+    """How much of the volume-aware bass applies, 0..1, at a sink volume (wpctl's
+    0..1 scale; its dB value is 60*log10(volume)). Ramps from from_db to to_db."""
+    v = p.volume_eq
+    if v is None or volume is None or volume <= 0:
+        return 0.0
+    db = 60 * math.log10(volume)
+    return min(1.0, max(0.0, (db - v["from_db"]) / (v["to_db"] - v["from_db"])))
+
+
 def controls(p: ChainProfile, eq_gains: list[float] | None, bands: list[int],
-             bass_db: float) -> dict[str, float]:
-    """Everything that can change while the chain runs, by "node:port" name."""
+             bass_db: float, volume: float | None = None, amount: float | None = None) -> dict[str, float]:
+    """Everything that can change while the chain runs, by "node:port" name.
+    amount overrides the volume-aware share (for ramps)."""
     c: dict[str, float] = {}
+    x = volume_amount(p, volume) if amount is None else min(1.0, max(0.0, amount))
+    veq = p.volume_eq or {"gain_db": 0.0, "bass_db": 0.0, "filters": []}
     if p.bass is not None:
-        c["bass:Amount (dB)"] = float(bass_db) if bass_db > BASS_MIN else -120.0
+        c["bass:Amount (dB)"] = round(float(bass_db) + x * veq["bass_db"], 3) if bass_db > BASS_MIN else -120.0
     gains = list(eq_gains) if eq_gains else [0.0] * len(bands)
     for ch in "LR":
         for i, g in enumerate(gains):
             c[f"eq{ch}{i}:Gain"] = float(g)
-    h = 10 ** (-headroom_db(eq_gains) / 20)
+        for i, f in enumerate(veq["filters"]):
+            c[f"veq{ch}{i}:Gain"] = round(x * f["gain"], 3)
+    h = 10 ** ((x * veq["gain_db"] - headroom_db(eq_gains)) / 20)
     for ch in "LR":
         c[f"mix{ch}:Gain 1"] = round((1 - p.crossfeed) * h, 6)
         c[f"mix{ch}:Gain 2"] = round(p.crossfeed * h, 6)
@@ -145,10 +175,10 @@ def controls(p: ChainProfile, eq_gains: list[float] | None, bands: list[int],
 
 
 def graph(p: ChainProfile, eq_gains: list[float] | None, bands: list[int], bass_db: float,
-          plugin: Path) -> dict:
+          plugin: Path, volume: float | None = None) -> dict:
     if not bands:
         raise ValueError("no equalizer bands")
-    ctl = controls(p, eq_gains, bands, bass_db)
+    ctl = controls(p, eq_gains, bands, bass_db, volume)
     nodes: list[dict] = []
     links: list[dict] = []
     inputs: dict[str, str] = {}
@@ -176,6 +206,17 @@ def graph(p: ChainProfile, eq_gains: list[float] | None, bands: list[int], bass_
             nodes.append({"type": "builtin", "name": n, "label": "bq_peaking",
                           "control": {"Freq": float(f), "Q": EQ_Q, "Gain": ctl[f"{n}:Gain"]}})
             attach(ch, f"{n}:In", f"{n}:Out")
+        # The profile's own fixed correction, then the volume-aware filters (live gains).
+        for i, f in enumerate(p.eq):
+            n = f"teq{ch}{i}"
+            nodes.append({"type": "builtin", "name": n, "label": "bq_peaking",
+                          "control": {"Freq": f["freq"], "Q": f["q"], "Gain": f["gain"]}})
+            attach(ch, f"{n}:In", f"{n}:Out")
+        for i, f in enumerate(p.volume_eq["filters"] if p.volume_eq else []):
+            n = f"veq{ch}{i}"
+            nodes.append({"type": "builtin", "name": n, "label": "bq_peaking",
+                          "control": {"Freq": f["freq"], "Q": f["q"], "Gain": ctl[f"{n}:Gain"]}})
+            attach(ch, f"{n}:In", f"{n}:Out")
     # Crossfeed: each output mixes its own channel and a share of the other one.
     pre = dict(tail)
     for ch, other in (("L", "R"), ("R", "L")):
@@ -200,11 +241,11 @@ def graph(p: ChainProfile, eq_gains: list[float] | None, bands: list[int], bass_
 
 
 def render(p: ChainProfile, speaker: str, eq_gains: list[float] | None, bands: list[int],
-           bass_db: float, plugin: Path) -> str:
+           bass_db: float, plugin: Path, volume: float | None = None) -> str:
     desc = f"Speakers (Prism {p.label})"
     module = {"name": "libpipewire-module-filter-chain", "args": {
         "node.description": desc, "media.name": desc,
-        "filter.graph": graph(p, eq_gains, bands, bass_db, plugin),
+        "filter.graph": graph(p, eq_gains, bands, bass_db, plugin, volume),
         "audio.channels": 2, "audio.position": ["FL", "FR"],
         "capture.props": {"node.name": NODE, "media.class": "Audio/Sink"},
         "playback.props": {
@@ -406,7 +447,7 @@ class ChainEngine:
             raise ValueError(f"unknown chain profile {name!r} (see: prism sound list)")
         return chains[name]
 
-    def build(self, s) -> tuple[ChainProfile, str, dict[str, float], str]:
+    def build(self, s, volume: float | None = None) -> tuple[ChainProfile, str, dict[str, float], str]:
         p = self.profile(s.chain)
         plugin = plugin_path()
         if plugin is None:
@@ -421,7 +462,15 @@ class ChainEngine:
         bass = min(BASS_MAX, max(BASS_MIN, float(s.chain_bass)))
         # The graph without the live controls: only a change here needs a new chain.
         shape = hashlib.sha256(render(p, spk[0], None, bands, 0.0, plugin).encode()).hexdigest()
-        return p, render(p, spk[0], gains, bands, bass, plugin), controls(p, gains, bands, bass), shape
+        return (p, render(p, spk[0], gains, bands, bass, plugin, volume),
+                controls(p, gains, bands, bass, volume), shape)
+
+    def live_controls(self, s, volume: float | None, amount: float | None = None) -> dict[str, float]:
+        """The controls for these settings at this sink volume (for the watcher)."""
+        p = self.profile(s.chain)
+        gains = load_eq_presets().get(s.eq) if s.eq else None
+        bass = min(BASS_MAX, max(BASS_MIN, float(s.chain_bass)))
+        return controls(p, gains, eq_bands_hz(), bass, volume, amount)
 
     # switching
     def apply(self, s, switching: bool) -> str:
@@ -429,12 +478,8 @@ class ChainEngine:
 
         switching: coming from EasyEffects (hand the volume over, stop EasyEffects).
         """
-        p, text, ctl, shape = self.build(s)
-        path = conf_path()
-        changed = not path.exists() or path.read_text() != text
         st = self.load_state()
-        new_shape = st.extra.get("shape") != shape
-        st.extra["shape"] = shape
+        nid = node_id(NODE)
         if switching:
             # EasyEffects is stopped only once the streams are on the chain (take_over):
             # a player whose output vanishes under it pauses, as if headphones were pulled.
@@ -446,21 +491,25 @@ class ChainEngine:
             sid = node_id(spk[0]) if spk else None
             v = get_volume(sid) if sid is not None else None
             st.volume = min(SAFE_START, v if v is not None else st.volume)
+        elif nid is not None:
+            v = get_volume(nid)
+            if v is not None:
+                st.volume = v
+        p, text, ctl, shape = self.build(s, st.volume)
+        path = conf_path()
+        changed = not path.exists() or path.read_text() != text
+        new_shape = st.extra.get("shape") != shape
+        st.extra["shape"] = shape
         self.save_state(st)
         if changed:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp")
             tmp.write_text(text)
             tmp.replace(path)
-        nid = node_id(NODE)
+        path.touch()  # marks "Prism is at work" for the watcher (busy_since)
         if new_shape or nid is None:
             # Profile or structure changed: a fresh chain. Live controls alone don't need one
             # (the file is still rewritten, so they stay after a restart).
-            if nid is not None and not switching:
-                v = get_volume(nid)
-                if v is not None:
-                    st.volume = v
-                    self.save_state(st)
             self.restart(st.volume, stop_ee=switching)
         else:
             set_controls(nid, ctl)
@@ -497,6 +546,9 @@ class ChainEngine:
         sid = node_id(spk[0]) if spk else None
         if sid is not None:
             set_volume(sid, volume)
+            # Players pause when their output vanishes under them: park them on the
+            # speakers (now at the listening volume) while the chain is rebuilt.
+            move_streams({NODE}, spk[0])
         systemctl("restart", "filter-chain")
         for _ in range(40):
             if node_id(NODE) is not None:
@@ -546,6 +598,7 @@ class ChainWatcher:
         self.settings = settings  # callable returning SoundSettings (tests)
         self.last_try = 0.0
         self.last_volume: float | None = None
+        self.last_amount: float | None = None
 
     def _settings(self):
         if self.settings:
@@ -558,13 +611,7 @@ class ChainWatcher:
         s = self._settings()
         if s.engine != CHAIN or not conf_path().exists():
             return None
-        try:  # Prism is switching or rebuilding right now: leave it alone
-            if time.time() - self.engine.state_path.stat().st_mtime < 8:
-                return "busy"
-        except OSError:
-            pass
         ids = node_ids()
-        spk = speaker_sink()
         if NODE in ids:
             v = get_volume(ids[NODE])
             if v is not None and v != self.last_volume:
@@ -572,7 +619,14 @@ class ChainWatcher:
                 st = self.engine.load_state()
                 st.volume = v
                 self.engine.save_state(st)
+                self.follow_volume(ids[NODE], s, v)
             return None
+        try:  # Prism is switching or rebuilding right now: leave it alone
+            if time.time() - self.busy_since() < 8:
+                return "busy"
+        except OSError:
+            pass
+        spk = speaker_sink()
         if spk is None:
             return None  # headphones in: nothing to do until the speakers return
         vol = self.engine.load_state().volume
@@ -584,11 +638,36 @@ class ChainWatcher:
         self.last_try = now
         try:
             self.engine.restart(vol)
+            self.last_volume = self.last_amount = None  # retune on the next look
             self.log("Prism chain restored on the speakers")
             return "restored"
         except ValueError as e:
             self.log(str(e))
             return "failed"
+
+    def busy_since(self) -> float:
+        """When Prism last rebuilt the chain (the chain file is written then)."""
+        return conf_path().stat().st_mtime
+
+    def follow_volume(self, nid: int, s, volume: float) -> None:
+        """Volume-aware bass: retune to the new volume, in small steps (no clicks)."""
+        try:
+            p = self.engine.profile(s.chain)
+        except ValueError:
+            return
+        if p.volume_eq is None:
+            return
+        x = volume_amount(p, volume)
+        old = self.last_amount
+        self.last_amount = x
+        if old is not None and abs(x - old) < 1e-4:
+            return
+        steps = 1 if old is None else max(1, min(8, math.ceil(abs(x - old) / 0.05)))
+        for k in range(1, steps + 1):
+            a = x if old is None else old + (x - old) * k / steps
+            set_controls(nid, self.engine.live_controls(s, volume, amount=a))
+            if k < steps:
+                time.sleep(0.02)
 
     def run(self, stop: threading.Event | None = None) -> None:
         """Event-driven: react to sink changes at once, and check every 5 s anyway."""

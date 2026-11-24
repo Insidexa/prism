@@ -138,7 +138,10 @@ A chain profile describes a speaker tuning for the Prism chain. Put it in
   "crossfeed": 0.0,
   "bass": {"h2_db": -20, "h3_db": -30, "h4_db": -28, "top_hz": 200, "bottom_hz": 12},
   "ceiling_db": -1.0,
-  "release_ms": 50
+  "release_ms": 50,
+  "eq": [{"freq": 80, "q": 0.7, "gain": 2.0}],
+  "volume_eq": {"from_db": -10, "to_db": 0, "gain_db": -1, "bass_db": -10,
+                "filters": [{"freq": 90, "q": 0.55, "gain": -8}]}
 }
 ```
 
@@ -147,6 +150,13 @@ A chain profile describes a speaker tuning for the Prism chain. Put it in
 - `bass`: Prism Bass levels of the 2nd–4th harmonic relative to the bass, and the
   bass band. The Sound page's bass slider moves all three together.
 - `ceiling_db`: the limiter's peak ceiling.
+- `eq`: fixed peaking filters, part of the tuning.
+- `volume_eq`: volume-aware bass, so the small speakers aren't overdriven when it's
+  loud. Between `from_db` and `to_db` of sink volume (60·log10 of the volume
+  slider's 0–1 value, so 0 dB is 100 %), the `filters` gains, an overall `gain_db`
+  and a `bass_db` change of Prism Bass fade in from nothing to their full value.
+  `prism daemon` retunes the running chain whenever the volume changes, in small
+  steps so it doesn't click.
 
 Prism writes the chain to `~/.config/pipewire/filter-chain.conf.d/prism-chain.conf`
 and runs it with PipeWire's `filter-chain` user service. While the chain is in use,
