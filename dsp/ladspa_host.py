@@ -1,6 +1,6 @@
 """Run a LADSPA plugin over a WAV file offline (for tests).
 
-Usage: python ladspa_host.py plugin.so in.wav out.wav [port=value ...]
+Usage: python ladspa_host.py [--index=N] plugin.so in.wav out.wav [port=value ...]
 """
 import ctypes as C
 import sys
@@ -26,10 +26,10 @@ class Descriptor(C.Structure):
                 ("cleanup", C.CFUNCTYPE(None, LADSPA_Handle))]
 
 
-def process(so, x, rate, controls, block=512):
+def process(so, x, rate, controls, block=512, index=0):
     lib = C.CDLL(so)
     lib.ladspa_descriptor.restype = C.POINTER(Descriptor)
-    d = lib.ladspa_descriptor(0).contents
+    d = lib.ladspa_descriptor(index).contents
     h = d.instantiate(C.byref(d), rate)
     names = [d.PortNames[i].decode() for i in range(d.PortCount)]
     ctrl = {}
@@ -68,10 +68,14 @@ def write(path, y, rate):
 
 
 if __name__ == "__main__":
-    so, src, dst = sys.argv[1:4]
+    args = sys.argv[1:]
+    index = 0
+    if args and args[0].startswith("--index="):
+        index = int(args.pop(0).split("=")[1])
+    so, src, dst = args[:3]
     controls = {}
-    for kv in sys.argv[4:]:
+    for kv in args[3:]:
         k, v = kv.rsplit("=", 1)
         controls[k] = float(v)
     x, rate = read(src)
-    write(dst, process(so, x, rate, controls), rate)
+    write(dst, process(so, x, rate, controls, index=index), rate)
