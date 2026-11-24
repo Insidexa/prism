@@ -225,6 +225,13 @@ def default_sink() -> str:
     return _run(["pactl", "get-default-sink"]).strip()
 
 
+def other_processor_active(speaker: str) -> bool:
+    """True when the default output is a virtual sink other than EasyEffects' own,
+    e.g. a PipeWire filter-chain in front of the speakers."""
+    d = default_sink()
+    return bool(d) and d != speaker and not d.startswith(("alsa_", "bluez_", "easyeffects"))
+
+
 class SoundEngine:
     def __init__(self, root: Path | None = None, store: SoundStore | None = None):
         self.root = root or ee_dir()
@@ -289,6 +296,10 @@ class SoundEngine:
             raise ValueError("no built-in speaker output found")
         self.set_autoload(preset, sink)
         self.store.save(s)
+        if not easyeffects_running() and other_processor_active(sink[0]):
+            # Starting EasyEffects now would grab every stream, including the other
+            # processor's own output, and break it. Keep the preset for later.
+            return "saved; another sound processor is the output, EasyEffects left off"
         if not easyeffects_running() and not start_easyeffects():
             raise ValueError("EasyEffects is not running and could not be started")
         if default_sink() == sink[0]:

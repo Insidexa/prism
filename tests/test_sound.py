@@ -128,6 +128,16 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.loaded, [])                 # nothing loaded onto headphones
         self.assertEqual(self.autoload()["preset-name"], PRISM_PRESET)
 
+    def test_does_not_start_easyeffects_over_another_processor(self):
+        self.default = "my_filter_chain"
+        started = []
+        with mock.patch.object(sound, "easyeffects_running", lambda: False), \
+                mock.patch.object(sound, "start_easyeffects", lambda: started.append(1) or True):
+            msg = self.engine.apply(SoundSettings("OMEN16 BO Music"))
+        self.assertIn("EasyEffects left off", msg)
+        self.assertEqual(started, [])
+        self.assertEqual(self.autoload()["preset-name"], PRISM_PRESET)  # still saved for later
+
     def test_off_uses_empty_preset_and_keeps_existing_autoload_file(self):
         f = self.ee / "autoload" / "output" / f"{SPEAKER[0]}:[Out] Speaker.json"
         f.write_text(json.dumps({"device": SPEAKER[0], "device-description": "x",
