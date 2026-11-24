@@ -216,9 +216,9 @@ system/             Fedora installer, udev rule, uninstaller
 Prism is licensed under the [GNU GPL v3](LICENSE).
 
 - Driver: [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard)
+  by alessandromrc and contributors (GPL).
   (installed from [a fork](https://github.com/Insidexa/omen-rgb-keyboard/tree/prism) with fixes for
   Linux 7.x, live lighting frames and single-zone brightness, until they are upstream)
-  by alessandromrc and contributors (GPL).
 - Icons in `data/icons/hicolor/scalable/status/` are from the
   [Adwaita icon theme](https://gitlab.gnome.org/GNOME/adwaita-icon-theme)
   (LGPL-3.0 / CC-BY-SA 3.0), renamed with a `prism-` prefix so they work with any
