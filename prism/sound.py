@@ -180,8 +180,13 @@ def base_bass(preset: dict) -> float | None:
 
 # --------------------------------------------------------------------------- system
 def _run(cmd: list[str], timeout: float = 10) -> str:
+    env = None
+    if "easyeffects" in cmd and "--service-mode" not in cmd:
+        # A command (-l, -q) starts a short-lived second EasyEffects that passes it on.
+        # Keep that one off the screen: no Wayland connection, so no window or dock icon.
+        env = os.environ | {"QT_QPA_PLATFORM": "offscreen"}
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 

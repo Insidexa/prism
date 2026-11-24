@@ -877,7 +877,7 @@ class SoundPage(Gtk.Box):
         self.status_row.set_subtitle("Applying…")
 
         def done(msg):
-            self.status_row.set_subtitle(msg[:1].upper() + msg[1:])
+            self.status_row.set_subtitle(GLib.markup_escape_text(msg[:1].upper() + msg[1:]))  # "B&O"
         self.win.worker.submit(self.engine.apply, settings, then=done)
 
     # ------------------------------------------------------------------ events
