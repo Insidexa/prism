@@ -51,14 +51,22 @@ def power_mode() -> str | None:
 
 
 def set_power_mode(name: str) -> bool:
+    """True when the mode was changed. tuned-ppd refuses while it is still
+    switching from the last change, so try again once a moment later."""
+    import time
+
     from gi.repository import GLib
-    try:
-        _bus(True).call_sync(PPD_BUS, PPD_PATH, "org.freedesktop.DBus.Properties", "Set",
-                             GLib.Variant("(ssv)", (PPD_BUS, "ActiveProfile", GLib.Variant("s", name))),
-                             None, 0, 3000, None)
-        return True
-    except Exception:
+    if power_mode() == name:
         return False
+    for attempt in range(3):
+        try:
+            _bus(True).call_sync(PPD_BUS, PPD_PATH, "org.freedesktop.DBus.Properties", "Set",
+                                 GLib.Variant("(ssv)", (PPD_BUS, "ActiveProfile", GLib.Variant("s", name))),
+                                 None, 0, 5000, None)
+            return True
+        except Exception:
+            time.sleep(1.0 + attempt)
+    return False
 
 
 # --------------------------------------------------------------------------- refresh rate
