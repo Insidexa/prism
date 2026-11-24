@@ -50,6 +50,17 @@ class UsageTest(unittest.TestCase):
         self.assertEqual(apps, [("Screen and system", 0.1)])
 
 
+class LogTest(unittest.TestCase):
+    def test_prune_before_anything_was_recorded(self):
+        with tempfile.TemporaryDirectory() as t:
+            log = b.UsageLog(Path(t) / "missing" / "usage.jsonl")
+            log.prune(1e9)  # no folder, no file: nothing to do, no error
+            log.append({"t": 1, "wh": 0.1})
+            log.append({"t": 2e9, "wh": 0.2})
+            log.prune(2e9)
+            self.assertEqual([r["t"] for r in log.records()], [2e9])
+
+
 class RecorderTest(unittest.TestCase):
     def test_records_on_battery_only(self):
         with tempfile.TemporaryDirectory() as t:

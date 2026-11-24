@@ -257,6 +257,8 @@ class UsageLog:
         return out
 
     def prune(self, now: float) -> None:
+        if not self.path.exists():
+            return  # nothing recorded yet (and maybe no folder either)
         keep = self.records(now - KEEP_DAYS * 86400)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text("".join(json.dumps(r) + "\n" for r in keep))
