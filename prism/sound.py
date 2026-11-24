@@ -25,6 +25,7 @@ OFF = "off"
 EQ_Q = 1.41  # OMEN Audio Control's 10-band graphic EQ, one octave per band
 
 FRIENDLY = {
+    "OMEN16 BO Music (Windows level)": "B&O (Windows, full level)",
     "OMEN16 BO Music": "B&O (Windows)",
     "Omen 16 Speakers": "Prism tuning",
 }
