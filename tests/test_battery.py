@@ -115,3 +115,9 @@ def test_devices_cache(tmp_path):
     write_devices_cache([DeviceBattery("MX Master 3S", 45.0, "discharging", "solaar")], p, now=10.0)
     assert json.loads(p.read_text()) == {
         "time": 10.0, "devices": [{"name": "MX Master 3S", "percent": 45.0, "state": "discharging"}]}
+
+
+def test_dgpu_sleep_disabled():
+    from prism.battery import dgpu_sleep_disabled
+    assert dgpu_sleep_disabled("root=x amdgpu.runpm=0 quiet")
+    assert not dgpu_sleep_disabled("root=x quiet")

@@ -7,7 +7,8 @@ A plan sets, in one go:
     144 Hz plugged in), saved in GNOME's display settings so a resume or a
     screen change doesn't bring the other rate back;
   - music lighting off on battery saver (it keeps the keyboard firmware busy).
-The discrete GPU sleeps by itself when nothing uses it (see prism battery);
+The discrete GPU sleeps by itself when nothing uses it, unless amdgpu.runpm=0
+(see prism battery);
 battery saver reports the apps that keep it awake.
 
 Automation rules can carry a plan (e.g. battery saver when unplugged).

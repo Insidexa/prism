@@ -199,6 +199,17 @@ def dgpu_state(addr: str | None = None) -> str | None:
         return None
 
 
+def dgpu_sleep_disabled(cmdline: str | None = None) -> bool:
+    """amdgpu.runpm=0 on the kernel command line: the discrete GPU never sleeps.
+    Needed on this laptop: its RX 6600M can fail to wake and drop off the bus."""
+    if cmdline is None:
+        try:
+            cmdline = Path("/proc/cmdline").read_text()
+        except OSError:
+            return False
+    return "amdgpu.runpm=0" in cmdline.split()
+
+
 def snapshot(dgpu: str | None) -> dict[str, list]:
     """{app: [cpu seconds, gpu seconds, uses dGPU]} over all processes we can see."""
     hz = os.sysconf("SC_CLK_TCK")

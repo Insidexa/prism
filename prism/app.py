@@ -624,7 +624,7 @@ class AutomationPage(Gtk.Box):
             title="Power plans",
             description="Applied when you plug in or unplug. Battery saver: GNOME's power saver mode "
                         "(quiet fans, lower CPU and GPU power), the screen at 60 Hz and music lighting off. "
-                        "The discrete GPU sleeps by itself when nothing uses it: see the Battery page.")
+                        "The discrete GPU sleeps by itself when nothing uses it, unless sleep is turned off for it (amdgpu.runpm=0): see the Battery page.")
         self.plan_rows = {}
         for key, title in (("battery", "On battery"), ("ac", "Plugged in")):
             row = Adw.ComboRow(title=title, model=Gtk.StringList.new(labels))

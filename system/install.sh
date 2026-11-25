@@ -73,6 +73,8 @@ sed "s/@USER@/$USER_NAME/g" "$HERE/70-prism-omen.rules" > /etc/udev/rules.d/70-p
 chmod 0644 /etc/udev/rules.d/70-prism-omen.rules
 install -m 0644 "$HERE/71-prism-omen-key.hwdb" /etc/udev/hwdb.d/71-prism-omen-key.hwdb
 install -m 0644 "$HERE/80-prism-runtime-pm.rules" /etc/udev/rules.d/80-prism-runtime-pm.rules
+install -m 0644 "$HERE/prism-dracut.conf" /etc/dracut.conf.d/prism-omen.conf
+dracut -f --regenerate-all || echo "dracut failed: run sudo dracut -f --regenerate-all" >&2
 systemd-hwdb update
 # udevd keeps the database it loaded: reload it (and the rules) before re-applying.
 udevadm control --reload

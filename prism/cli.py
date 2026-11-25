@@ -276,7 +276,8 @@ def battery_report(hours: float) -> int:
     if state:
         users = b.dgpu_users()
         print(f"discrete GPU: {'awake' if state == 'active' else 'asleep'}"
-              + (f", in use by {', '.join(users)}" if users else ""))
+              + (f", in use by {', '.join(users)}" if users else "")
+              + (" (sleep is off: amdgpu.runpm=0)" if b.dgpu_sleep_disabled() else ""))
     for d in b.peripherals():
         print(f"{d.name}: {d.percent:.0f}% {d.state}")
     total, apps = b.usage(b.UsageLog().records(_t.time() - hours * 3600))
