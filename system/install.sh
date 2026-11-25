@@ -8,9 +8,10 @@
 set -euo pipefail
 
 # OmenLinux's driver plus Prism's fixes (Linux 7.x state saving, the live "frame"
-# lighting file for music lighting, single-zone brightness), until they are upstream.
+# lighting file for music lighting, single-zone brightness, fan curve re-send and
+# sleep handover, battery charge control), until they are upstream.
 DRIVER_REPO=https://github.com/Insidexa/omen-rgb-keyboard.git
-DRIVER_COMMIT=75739ec5583045c57d5f3732b542820a464b0b69
+DRIVER_COMMIT=a623b74637642744655a7f8f53d7ac78866c953e
 SRC="${1:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 STATE_DIR=/var/lib/omen-rgb-keyboard
