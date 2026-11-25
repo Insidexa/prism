@@ -105,3 +105,13 @@ class RecorderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_devices_cache(tmp_path):
+    import json
+
+    from prism.battery import DeviceBattery, write_devices_cache
+    p = tmp_path / "prism" / "devices.json"
+    write_devices_cache([DeviceBattery("MX Master 3S", 45.0, "discharging", "solaar")], p, now=10.0)
+    assert json.loads(p.read_text()) == {
+        "time": 10.0, "devices": [{"name": "MX Master 3S", "percent": 45.0, "state": "discharging"}]}

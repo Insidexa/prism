@@ -1,4 +1,5 @@
-// Prism Quick Settings: keyboard lighting tile, Max fans and the speaker sound toggle.
+// Prism Quick Settings: keyboard lighting tile, Max fans and the speaker sound toggle,
+// plus the top-bar status (watts on battery, GPU awake, fans, low mouse battery).
 // All changes go through the `prism` command, so validation lives in one place.
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
@@ -10,6 +11,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {QuickMenuToggle, QuickToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
+
+import {PrismStatus} from './status.js';
 
 const EFFECTS = [
     ['static', 'Static'], ['breathing', 'Breathing'], ['rainbow', 'Rainbow'],
@@ -244,6 +247,8 @@ export default class PrismExtension extends Extension {
     enable() {
         this._indicator = new PrismIndicator(this);
         Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
+        this._status = new PrismStatus(this, runPrism);
+        Main.panel.addToStatusArea('prism-status', this._status, 0, 'right');
         // Refresh whenever Quick Settings opens, so changes made in the app,
         // the terminal or GNOME's Power Mode show up without polling.
         this._menuId = Main.panel.statusArea.quickSettings.menu.connect('open-state-changed',
@@ -259,6 +264,8 @@ export default class PrismExtension extends Extension {
         this._menuId = 0;
         this._indicator?.destroy();
         this._indicator = null;
+        this._status?.destroy();
+        this._status = null;
     }
 
     icon(name) {

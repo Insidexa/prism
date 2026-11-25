@@ -338,9 +338,9 @@ class UsageRecorder:
             stop.wait(SAMPLE_S)
 
 
-def _run(cmd: list[str]) -> str:
+def _run(cmd: list[str], timeout: float = 10) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -391,8 +391,10 @@ def solaar_batteries(text: str | None = None) -> list[DeviceBattery]:
             return []
         if time.monotonic() - _SOLAAR_CACHE[0] < 120:
             return list(_SOLAAR_CACHE[1])
-        out = solaar_batteries(_run(["solaar", "show"]))
-        _SOLAAR_CACHE = (time.monotonic(), out)
+        # Takes 6-8 s, longer while the system is busy (e.g. right after login).
+        out = solaar_batteries(_run(["solaar", "show"], timeout=45))
+        if out:  # a failed read is retried next time instead of hiding the devices
+            _SOLAAR_CACHE = (time.monotonic(), out)
         return list(out)
     out, name = [], None
     for line in text.splitlines():
@@ -406,3 +408,58 @@ def solaar_batteries(text: str | None = None) -> list[DeviceBattery]:
             out.append(DeviceBattery(name, float(b.group(1)), state, "solaar"))
             name = None
     return out
+
+
+# --------------------------------------------------------------------------- for the top bar
+def devices_cache_path() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "prism" / "devices.json"
+
+
+def write_devices_cache(devs: list[DeviceBattery], path: Path | None = None, now: float | None = None) -> None:
+    """Device batteries for the GNOME top bar, which can't run Solaar itself."""
+    import json
+    path = path or devices_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({
+        "time": time.time() if now is None else now,
+        "devices": [{"name": d.name, "percent": d.percent, "state": d.state} for d in devs],
+    }))
+    tmp.replace(path)
+
+
+class DevicesWriter:
+    """prism daemon: refresh devices.json every 10 minutes (Solaar takes ~2 s of CPU)."""
+
+    INTERVAL = 600
+
+    def __init__(self, log=print):
+        self.log = log
+
+    def run(self, stop=None) -> None:
+        import threading
+        stop = stop or threading.Event()
+        while not stop.is_set():
+            wait = self.INTERVAL
+            try:
+                devs = peripherals()
+                write_devices_cache(devs)
+                if not any(d.source == "solaar" for d in devs) and _solaar_has_devices():
+                    wait = 60  # Solaar timed out (busy system): try again soon
+            except Exception as e:  # noqa: BLE001 - a broken reader must not stop the daemon
+                self.log(f"device batteries: {e}")
+            stop.wait(wait)
+
+
+def _solaar_has_devices() -> bool:
+    """Solaar installed and a Logitech receiver plugged in."""
+    from shutil import which
+    if not which("solaar"):
+        return False
+    for vid in Path("/sys/bus/usb/devices").glob("*/idVendor"):
+        try:
+            if vid.read_text().strip() == "046d":
+                return True
+        except OSError:
+            continue
+    return False
