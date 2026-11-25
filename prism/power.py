@@ -4,7 +4,8 @@ A plan sets, in one go:
   - GNOME's Power Mode (power-profiles-daemon or tuned-ppd), which on this
     laptop also moves the OMEN thermal profile (fans, CPU/GPU power);
   - the built-in screen's refresh rate (60 Hz saves about a watt on battery,
-    144 Hz plugged in), through GNOME's display settings, temporarily;
+    144 Hz plugged in), saved in GNOME's display settings so a resume or a
+    screen change doesn't bring the other rate back;
   - music lighting off on battery saver (it keeps the keyboard firmware busy).
 The discrete GPU sleeps by itself when nothing uses it (see prism battery);
 battery saver reports the apps that keep it awake.
@@ -71,7 +72,7 @@ def set_power_mode(name: str) -> bool:
 
 # --------------------------------------------------------------------------- refresh rate
 MUTTER = ("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig")
-VERIFY, TEMPORARY = 0, 1
+VERIFY, TEMPORARY, PERSISTENT = 0, 1, 2
 
 
 def _state():
@@ -97,10 +98,11 @@ def builtin_rates() -> tuple[float, list[float]] | None:
     return None
 
 
-def set_builtin_refresh(which: str, method: int = TEMPORARY) -> float | None:
+def set_builtin_refresh(which: str, method: int = PERSISTENT) -> float | None:
     """Switch the laptop screen to its lowest ('min') or highest ('max') rate at the
     current resolution, every other setting kept. Returns the new rate, or None.
-    Temporary: GNOME's saved display settings come back at the next login."""
+    Persistent by default: a temporary change is undone when GNOME reapplies its
+    saved settings (after suspend, say), which left 144 Hz running on battery."""
     from gi.repository import GLib
     try:
         bus, (serial, monitors, logical, _props) = _state()
