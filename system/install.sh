@@ -88,7 +88,7 @@ modprobe omen_rgb_keyboard
 udevadm settle -t 10 || true
 # The bind event normally applies ownership; do it directly as well in case
 # the rule ran before the attributes existed.
-(cd "$DEV" && find rgb_zones fan -maxdepth 1 -type f -perm -u=w -exec chown "$USER_NAME" {} +)
+(cd "$DEV" && find rgb_zones fan battery -maxdepth 1 -type f -perm -u=w -exec chown "$USER_NAME" {} +)
 
 echo
 echo "Done. Driver $(modinfo -F version omen_rgb_keyboard 2>/dev/null) is loaded and $USER_NAME can change its settings."

@@ -196,11 +196,25 @@ def run_daemon(interval: float = 5.0) -> int:
     from .battery import DevicesWriter
     # Mouse and keyboard batteries for the top-bar indicator.
     threading.Thread(target=DevicesWriter(log=log).run, daemon=True, name="devices").start()
+    import signal
+    import sys
+    from .charge import ChargeLimiter
+    # Battery charge limit: holds charging while plugged in above the limit.
+    # Stopped cleanly on exit, so charging is never left held.
+    charge_stop = threading.Event()
+    charge = threading.Thread(target=ChargeLimiter(log=log).run, args=(charge_stop,),
+                              daemon=True, name="charge")
+    charge.start()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     auto = Automation(OmenDevice(), AutomationStore(), PresetStore(), log=log)
-    while True:
-        try:
-            power_auto.step()
-        except Exception as e:  # a missing GNOME session must not stop the lighting rules
-            log(f"power plans: {e}")
-        auto.step(datetime.now())
-        time.sleep(interval)
+    try:
+        while True:
+            try:
+                power_auto.step()
+            except Exception as e:  # a missing GNOME session must not stop the lighting rules
+                log(f"power plans: {e}")
+            auto.step(datetime.now())
+            time.sleep(interval)
+    finally:
+        charge_stop.set()
+        charge.join(10)

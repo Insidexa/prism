@@ -62,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("battery", help="battery status, history and estimated use per app")
     s.add_argument("--hours", type=float, default=24, help="period for use per app (default 24)")
 
+    s = sub.add_parser("charge", help="battery charge limit: stop charging at a level while plugged in")
+    s.add_argument("limit", nargs="?", default="status",
+                   help="a percentage (50-100), 'off', or 'status' (default)")
+
     s = sub.add_parser("music", help="keyboard lighting that follows the music playing")
     s.add_argument("action", choices=("on", "off", "status"))
     s.add_argument("--sensitivity", type=float, help="0.5 (calm) to 2 (lively), default 1")
@@ -95,6 +99,8 @@ def run(argv: list[str]) -> int:
         from .automation import run_daemon
         return run_daemon()
 
+    if args.cmd == "charge":
+        return _charge(args.limit)
     if args.cmd == "battery":
         return battery_report(args.hours)
     if args.cmd == "plan":
@@ -309,3 +315,33 @@ def sound_status() -> dict:
 
 def main() -> int:
     return run(sys.argv[1:])
+
+
+def _charge(arg: str) -> int:
+    from . import charge as c
+    store = c.ChargeStore()
+    s = store.load()
+    if arg != "status":
+        if arg == "off":
+            s.limit = None
+        else:
+            try:
+                n = int(arg.rstrip("%"))
+            except ValueError:
+                print("prism: give a percentage (50-100), off or status", file=sys.stderr)
+                return 2
+            if not 50 <= n <= 100:
+                print("prism: the limit must be between 50 and 100", file=sys.stderr)
+                return 2
+            s.limit = None if n == 100 else n
+        store.save(s)
+    if not c.available():
+        print("charge limit: not supported (needs the Omen driver with battery/charge_control)")
+        return 1 if arg != "status" else 0
+    pct = c.battery_percent()
+    print(f"charge limit: {f'{s.limit}% (charges again below {s.limit - s.margin}%)' if s.limit else 'off'}"
+          + (f", battery {pct:.0f}%" if pct is not None else ""))
+    if arg != "status":
+        print("prism daemon applies it within 30 seconds")
+    return 0
+

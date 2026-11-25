@@ -1014,6 +1014,24 @@ class BatteryPage(Gtk.Box):
             now.add(r)
         page.add(now)
 
+        from . import charge as _c
+        self._charge = _c
+        care = Adw.PreferencesGroup(
+            title="Battery care",
+            description="Stop charging at a lower level while plugged in: the battery wears much more "
+                        "slowly near 80% than at 100%. Charging starts again 5% below the limit, and "
+                        "unplugged the full charge is always used.")
+        self.limit_values = [None, *_c.LIMITS]
+        self.limit_row = Adw.ComboRow(
+            title="Stop charging at",
+            model=Gtk.StringList.new(["100% (off)", *[f"{v}%" for v in _c.LIMITS]]))
+        lim = _c.ChargeStore().load().limit
+        self.limit_row.set_selected(self.limit_values.index(lim) if lim in self.limit_values else 0)
+        self.limit_row.connect("notify::selected", self._limit_changed)
+        care.add(self.limit_row)
+        care.set_visible(_c.available())
+        page.add(care)
+
         hist = Adw.PreferencesGroup(title="Last 24 hours", description="Charge, from GNOME's power history")
         self.chart = Sparkline(length=200, lo=0, hi=100)
         self.chart.set_content_height(70)
@@ -1039,6 +1057,14 @@ class BatteryPage(Gtk.Box):
                         "no laptop measures power per app.")
         page.add(self.apps)
         self._app_rows: list[Gtk.Widget] = []
+
+    def _limit_changed(self, row, _p) -> None:
+        store = self._charge.ChargeStore()
+        s = store.load()
+        s.limit = self.limit_values[row.get_selected()]
+        store.save(s)
+        self.win.toast("Charge limit off" if s.limit is None
+                       else f"Charging stops at {s.limit}% while plugged in")
 
     def refresh(self) -> None:
         from . import battery as b

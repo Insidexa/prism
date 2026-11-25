@@ -43,6 +43,11 @@ community [omen-rgb-keyboard](https://github.com/OmenLinux/omen-rgb-keyboard) dr
   use per app on battery, like macOS's Battery settings. As on a Mac, use per app
   is an estimate from each app's CPU and GPU activity: no laptop measures power per
   app. `prism battery` prints the same.
+- **Battery care**: stop charging at 60, 70, 80 or 90 % while plugged in, as HP's
+  battery care does on Windows (`prism charge 80`, `prism charge off`). The laptop
+  then runs from the adapter; charging resumes 5 % under the limit, and unplugged
+  the whole charge is used. Uses the firmware's charge hold (HP WMI 0x2B mode 5),
+  found in the board 8902 BIOS; needs the Omen driver with `battery/charge_control`.
 - **Power plans**: Battery saver, Balanced and Performance in one choice: GNOME's
   Power Mode (which also moves the OMEN fan and power profile), the screen's
   refresh rate (60 Hz on battery saver, the highest otherwise) and music lighting.
