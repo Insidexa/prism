@@ -493,7 +493,9 @@ class PerformancePage(Gtk.Box):
         self._loading = False
 
     def _tick(self):
-        if not self.get_mapped():
+        # Nothing to show when the page is hidden, or the window minimized or
+        # covered (GTK keeps those mapped): skip the sensor and firmware reads.
+        if not self.get_mapped() or self.win.is_suspended():
             return GLib.SOURCE_CONTINUE
         t = self.sensors.cpu_temp_c()
         self.cpu_temp.set(t)
@@ -508,10 +510,13 @@ class PerformancePage(Gtk.Box):
         else:
             busy = g.busy_percent()
             self.gpu_temp.set(g.temp_c(), sub=f"{g.name} · {busy if busy is not None else '–'}% busy")
-        # Fan speeds come from firmware (~300 ms each): read them in the
-        # background, at most one read in flight, every other tick.
+        # Fan speeds come from firmware (~300 ms of kernel time each): read them
+        # in the background, at most one read in flight, every other tick, and
+        # every fifth on battery.
         self._ticks += 1
-        if not self._fan_pending and self._ticks % 2 == 0:
+        from .automation import on_ac_power
+        every = 2 if on_ac_power() else 5
+        if not self._fan_pending and self._ticks % every == 0:
             self._fan_pending = True
             self.win.worker.submit(self._read_fans, then=self._show_fans)
         return GLib.SOURCE_CONTINUE
