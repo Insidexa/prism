@@ -83,3 +83,16 @@ class Sensors:
         if not last or total == last[1]:
             return None
         return 100 * (1 - (idle - last[0]) / (total - last[1]))
+
+
+def thermal_zone_temp_c(zone_type: str, root: Path = Path("/sys/class/thermal")) -> float | None:
+    """Temperature of the first thermal zone of this type (e.g. acpitz), in °C."""
+    for z in sorted(root.glob("thermal_zone*")):
+        try:
+            if (z / "type").read_text().strip() != zone_type:
+                continue
+        except OSError:
+            continue
+        v = _read_int(z / "temp")
+        return None if v is None else v / 1000
+    return None

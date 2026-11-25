@@ -499,7 +499,13 @@ class PerformancePage(Gtk.Box):
             return GLib.SOURCE_CONTINUE
         t = self.sensors.cpu_temp_c()
         self.cpu_temp.set(t)
-        self.editor.current_temp = t
+        # Mark the temperature the driver's curve actually follows (acpitz,
+        # slower and often a few degrees off the CPU's own sensor).
+        if not hasattr(self, "_curve_zone"):
+            self._curve_zone = self.dev.fan_temp_zone()
+        from .sensors import thermal_zone_temp_c
+        zt = thermal_zone_temp_c(self._curve_zone) if self._curve_zone else None
+        self.editor.current_temp = zt if zt is not None else t
         self.editor.queue_draw()
         self.cpu_load.set(self.sensors.cpu_percent())
         g = self.sensors.dgpu or (self.sensors.gpus[0] if self.sensors.gpus else None)

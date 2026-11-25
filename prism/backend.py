@@ -239,6 +239,13 @@ class OmenDevice:
     def set_gpu_fan_curve(self, points: list[CurvePoint] | None) -> None:
         self.write("fan/gpu_fan_curve", "cpu" if points is None else format_curve(points))
 
+    def fan_temp_zone(self) -> str | None:
+        """The thermal zone the driver's fan curve follows (e.g. acpitz)."""
+        try:
+            return self.read("fan/fan_temp_zone") or None
+        except OmenError:
+            return None
+
     def curve_enabled(self) -> bool:
         return self.read("fan/fan_curve_enable") == "1"
 
